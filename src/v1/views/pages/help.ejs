@@ -1,0 +1,64 @@
+<% include ../partials/header.ejs %>
+<main role="main">
+
+  <div class="jumbotron">
+    <div class="container">
+      <h1 class="h3">API v1</h1>
+      <p>This is a test API application for replenishing a mobile account only for Kyivstar users living in Ukraine</p>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="row">
+      <div class="col-md-6">
+        <h3>Account refilling</h3>
+        <p class="text-muted">Refill phone account using a secret-key and a hash-data</p>
+        <pre>POST /v1/bill
+{
+  "secret": "6:oY4GP:4lsX3t+B7LzN5(soOGbQLWrv",
+  "token": "f53606bf75368fa42913bbcf3f985e18d695f28505ab64bcf63fad17d24c760c7554c00fc7a6a3ae3d7753dc49120929ab523e6f03934d3009e1e658650cd7d4d0bf760799d3d0bb60c6383013da554b3eb91e30752203cdec3385380a9a6c76ba625c4cc962a8e12a5d9b4ec2632de9f9d9c3e36d5ceaafc52206ca0c1441fb6776ce3c7f79fc86e9ccc31a5874abebc7bbfae4a05aa195f7cd1958c08f81f0d7854724bbca812f5f41544038e1faa189ae21932304584d05",
+  "tel": "0971234567",
+  "pmFingerprint": "35a9319728e34f066e0fb1e3180d1b54",
+  "pbFingerprint": "7da4b3227dbc8a453ad3e5d8481917a7"
+}</pre>
+      </div>
+
+      <div class="col-md-6">
+        <h3>Confirmation of refilling</h3>
+        <p class="text-muted">Confirm of account refilling action using a pin-code</p>
+        <pre>POST /v1/pin
+{
+  "sid": "1F0393975B819E2EF610F591202A954B",
+  "pin": "222856"
+}</pre>
+      </div>
+
+      <div class="col-md-6">
+        <h3>Encode card data</h3>
+        <p class="text-muted">Encodes a credit card data and creates a pair of a secret key and a hash-data</p>
+        <pre>POST /v1/encode
+{
+  "MM": "XX",
+  "YY": "XX",
+  "cvv2": "XXX",
+  "card_number": "XXXXXXXXXXXXXXXX"
+}</pre>
+      </div>
+
+      <div class="col-md-6">
+        <h3>Decode card data</h3>
+        <p class="text-muted">Decode hash-data using a secret key and returns data of a credit card</p>
+        <pre>POST /v1/decode
+{
+  "secret": "6:oY4GP:4lsX3t+B7LzN5(soOGbQLWrv",
+  "token": "f53606bf75368fa42913bbcf3f985e18d695f28505ab64bcf63fad17d24c760c7554c00fc7a6a3ae3d7753dc49120929ab523e6f03934d3009e1e658650cd7d4d0bf760799d3d0bb60c6383013da554b3eb91e30752203cdec3385380a9a6c76ba625c4cc962a8e12a5d9b4ec2632de9f9d9c3e36d5ceaafc52206ca0c1441fb6776ce3c7f79fc86e9ccc31a5874abebc7bbfae4a05aa195f7cd1958c08f81f0d7854724bbca812f5f41544038e1faa189ae21932304584d05"
+}</pre>
+      </div>
+    </div>
+
+    <hr />
+
+  </div>
+</main>
+
+<% include ../partials/footer.ejs %>

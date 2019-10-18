@@ -1,0 +1,57 @@
+#!/usr/bin/bash
+
+# A bash script for serving the backend apps using the Docker
+# Author: Alexander Yukal <yukal.alexander@gmail.com>
+
+# Set variables
+APP_NAME=${PWD##*/}
+APP_IMAGE=$APP_NAME:backend
+NODE_IMAGE=node:11-alpine
+PORTS=5000:5000
+WORKDIR=/home/node
+
+IMAGE_ID=$(docker image ls -q "${APP_NAME}")
+
+# Dockerfile Contents
+read -r -d '' DOCKERFILE << EOM
+FROM $NODE_IMAGE
+WORKDIR $WORKDIR
+RUN apk update \
+ && apk upgrade \
+ && apk --no-cache add --virtual bash \
+ && apk --no-cache add --virtual mc \
+ && npm i -g --unsafe-perm node-gyp
+EOM
+
+# Build Docker image
+if [ -z "$IMAGE_ID" ]; then
+    echo "CREATE IMAGE FROM {$APP_IMAGE}";
+    docker build - <<< "${DOCKERFILE}" --tag $APP_IMAGE
+fi
+
+# Get container ID and state of the Docker image
+CONTAINER_ID=$(docker ps -q -a -f name="${APP_NAME}")
+if [ -z "$CONTAINER_ID" ];
+    then CONTAINER_STATE=false
+    else CONTAINER_STATE=$(docker inspect -f {{.State.Running}} $CONTAINER_ID)
+fi
+
+# Set arguments for Docker
+if [ -z "$1" ];
+    then ARG="bash";
+    else ARG="$1";
+fi
+
+if [ -z "$CONTAINER_ID" ]; then
+    # The container hasn't found. Run from the image
+    docker run -it --rm --name $APP_NAME -p "${PORTS}" -p 5001:5001 --network bridge \
+        -v "${PWD}":"${WORKDIR}" \
+        -w "${WORKDIR}" $APP_IMAGE $ARG
+else
+    # The container has found. Run from the container
+    if [ "$CONTAINER_STATE" == "true" ]; then
+        docker exec -it $CONTAINER_ID $ARG
+    else
+        docker container start -ai $CONTAINER_ID
+    fi
+fi
