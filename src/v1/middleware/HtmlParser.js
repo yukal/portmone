@@ -1,69 +1,45 @@
 class HtmlParser {
     constructor(html) {
         this.html = html;
-        // Object.defineProperty(this, '_html', { value: html });
-    }
-
-    querySelector(query, collection=[]) {
-        const { mask, masks } = buildQSMasks(query);
-        const reqex = new RegExp(mask, 'ig');
-        let data = this.html.substr(0);
-        let matches;
-        // let index = 0;
-
-        while (matches = reqex.exec(data)) {
-            const [ html ] = matches;
-            let matchesResult = true;
-            let last = matches.index + html.length;
-
-            // index += last;
-            data = data.substr(last);
-
-            for (const submask of masks) {
-                const subRegex = new RegExp(submask, 'ig');
-                matchesResult = matchesResult && subRegex.test(data);
-            }
-
-            if (matchesResult) {
-                return parseHTML(html, collection);
-            }
-        }
-
-        return undefined;
     }
 
     getFormsData(target) {
         let data = this.html.substr(0);
-        // let index = 0;
         let matches;
         let formData;
+        let position = 0;
+        let start = -1;
+        let end = -1;
         const forms = [];
 
-        while(matches = /<input.*?>|<\/?(form).*?>/ig.exec(data)) {
-            const [ html, form ] = matches;
-            let last = matches.index + html.length;
+        while (matches = /<(\/?form).*?>/im.exec(data)) {
+            const [ tpl, tag ] = [ ...matches ];
+            let { index, groups } = matches;
+
+            let last = index + tpl.length;
+            position += last;
             data = data.substr(last);
-            // index += last;
 
-            if (form) {
-                const attributes = parseHTML(html, 'attributes');
+            if (tag == 'form') {
+                const attributes = parseHTML(tpl, 'attributes');
 
-                if (Object.keys(attributes).length) {
-                    if (target && !isMatchedAttribute(attributes, target)) {
-                        continue;
-                    }
-
-                    forms.push(attributes);
-                    formData = forms[ forms.length-1 ];
-                    formData.values = {};
+                if (target && !isMatchedAttribute(attributes, target)) {
+                    continue;
                 }
-            } else if (formData) {
-                const attributes = parseHTML(html, 'attributes');
 
-                if (attributes.hasOwnProperty('name') && attributes.hasOwnProperty('value')) {
-                    const { name, value } = attributes;
-                    name && (formData.values[ name ] = value);
-                }
+                forms.push(attributes);
+                formData = forms[ forms.length-1 ];
+                formData.values = {};
+                start = position;
+            }
+
+            else if (tag == '/form' && position>start && start>-1) {
+                end = position - tpl.length;
+                const html = this.html.substring(start, end);
+                formData.values = getFormChildItems(html);
+
+                start = -1;
+                end = -1;
             }
         }
 
@@ -71,41 +47,37 @@ class HtmlParser {
     }
 }
 
-function buildQSMasks(query) {
-    let mask = '';
-    let masks = [];
+function getFormChildItems(html) {
+    let data = html.substr(0);
     let matches;
+    const values = {};
 
-    if (matches = /(\w+)(?:\[([\S=]+)\])?/i.exec(query)) {
-        let [ html, tag, params ] = matches;
-        masks = params.split("][").map(item => {
-            const paramsChunks = item.split("=");
-            if (paramsChunks.length == 2) {
-                paramsChunks[1] = paramsChunks[1].replace(/^['"]/, '').replace(/["']$/, '');
-                return `(?:${paramsChunks[0]}=["']?${paramsChunks[1]}['"]?)`;
-            }
-            return paramsChunks[0];
-        });
-
-        mask = `<${tag}.*${masks.shift()}.*>`;
+    while (matches = /<\w+\s(?:[^>]*)name=(?:[^>]*)>/im.exec(data)) {
+        let last = matches.index + matches[0].length;
+        const { name, value } = parseHTML(matches[0], 'attributes');
+        name && (values[ name ] = value || '');
+        data = data.substr(last);
     }
 
-    return { mask, masks };
+    return values;
 }
 
 function isMatchedAttribute(attrs, target) {
-    if (target) {
-        let attrName = '';
+    if (target.length) {
+        let attributeName = 'name';
+        const aliases = {
+            '#': 'id',
+            '.': 'class'
+        };
 
-        if (target[0] == '#') {
-            attrName = 'id';
+        if (aliases.hasOwnProperty(target[0])) {
+            attributeName = aliases[ target[0] ];
+            target = target.substr(1);
         }
 
-        if (target[0] == '.') {
-            attrName = 'class';
+        if (attrs.hasOwnProperty(attributeName)) {
+            return target == attrs[ attributeName ];
         }
-
-        return attrs.hasOwnProperty(attrName) && target.substr(1) == attrs[attrName];
     }
 
     return false;
@@ -186,14 +158,5 @@ function toType(type) {
 
     return type;
 }
-
-// function HtmlParser(html) {
-//     if (!(this instanceof HtmlParser)) {
-//         return new HtmlParser(html);
-//     }
-
-//     this.html = html;
-//     Object.defineProperty(this, 'original_html', { value: html });
-// };
 
 module.exports = HtmlParser;
