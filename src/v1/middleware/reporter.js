@@ -1,116 +1,119 @@
 const util = require('util');
 const fs = require('fs');
 const datas = require('./datas');
+const clr = require('./colors');
 
-const INDENT_STEP = 4;
-const DEFAULT_COLORS = {
-    'default': 'dark-gray',
-    'content-type': '256:106',
-    'content-encoding': '256:106',
-    // 'content-type': 'cyan',
-    // 'content-encoding': 'cyan',
-    // 'transfer-encoding': 'light-magenta',
-    // 'date': 'yellow',
-    // 'expires': 'yellow',
-    'method': 'white',
-};
-const PALETTE = {
-    'default': 39,
-    'black': 30,
-    'red': 31,
-    'green': 32,
-    'yellow': 33,
-    'blue': 34,
-    'magenta': 35,
-    'cyan': 36,
-    'light-gray': 37,
-    'dark-gray': 90,
-    'light-red': 91,
-    'light-green': 92,
-    'light-yellow': 93,
-    'light-blue': 94,
-    'light-magenta': 95,
-    'light-cyan': 96,
-    'white': 97,
-};
+const SEP_HEAD = ' > ';
+const SEP_CONT = '; ';
+const BLOCK_LIMIT = 104;
 
 function paint(key, val, colors) {
-    const defaultColor = colors.default || 'default';
-    let color = defaultColor;
+    let color = colors.hasOwnProperty(key) ?colors[key] :'gray';
 
-    if (typeof(colors[key]) == 'string') {
-        if (colors[key].substr(0,4) == '256:') {
-            return util.format('\x1B[38;05;%sm%s\x1B[0m', colors[key].substr(4), val)
-        } else {
-            color = colors[key] || 'default';
-        }
+    if (datas.isFunction(color)) {
+        color = color(val);
     }
 
-    if (typeof(colors[key]) == 'function') {
-        color = colors[key](val) || 'default';
-        if (!PALETTE.hasOwnProperty(color)) {
-            return color;
-        }
-    }
-
-    return colors.hasOwnProperty(key)
-        ? util.format('\x1B[%sm%s\x1B[0m', PALETTE[color], val)
-        : util.format('\x1B[%sm%s\x1B[0m', PALETTE[defaultColor], val);
+    return clr.hasOwnProperty(color)
+        ? clr[color](val)
+        : clr(color, val)
+    ;
 }
 
-function formatOptions(data, indentNum=2, colors) {
+function formatHeaderItems(data, items, formats={}, colors) {
+    const formattedItems = [];
+    for (const name of items) {
+        let value = formats.hasOwnProperty(name)
+            ? formats[name](datas.getDataFrom(data, name))
+            : datas.getDataFrom(data, name)
+        ;
+
+        if (! datas.isEmpty(value)) {
+            colors
+                ? formattedItems.push(paint(name, value, colors))
+                : formattedItems.push(value)
+            ;
+        }
+    }
+    return formattedItems;
+}
+
+function formatHeaders(data, indentNum=2, colors) {
     const indent = ' '.repeat(indentNum);
     const headers = {};
-    const info = [];
+    let info = [];
+
+    const HEAD_SEPARATOR = colors ?paint('separator-head', SEP_HEAD, colors) :SEP_HEAD;
+    const CONT_SEPARATOR = colors ?paint('separator-cont', SEP_CONT, colors) :SEP_CONT;
 
     if (! data) {
         return info;
     }
 
-    const contentLength = data.hasOwnProperty('content-length')
-        ? Math.round(data['content-length'] / 1024) : 0;
-    const cntlenInfo = contentLength>0 ? ` (${contentLength} Kb)` : '';
-    const date = data.hasOwnProperty('date') ?data.date :'';
-    headers.server = `${data.server}  ${ date }${ cntlenInfo }`;
+    const hdrServer = [
+        'server', 'date', 'content-length',
+    ];
 
-    const contentData = [
-        getContentType(data).join(', '),
-        data.hasOwnProperty('content-encoding') 
-            ? data['content-encoding'] : '',
-        data.hasOwnProperty('set-cookie') ?'cookie' :'',
-        data.hasOwnProperty('transfer-encoding') 
-            ? data['transfer-encoding'] : '',
-        data.hasOwnProperty('x-content-type-options') 
-            ? data['x-content-type-options'] : '',
-        getCacheType(data),
-        data.hasOwnProperty('strict-transport-security') 
-            ? data['strict-transport-security'] : '',
-        data.hasOwnProperty('vary') 
-            ? data['vary'] : '',
-    ].filter(s=>s.length).join('; ');
-
-    if (contentData.length > 2) {
-        headers.content = contentData;
-    }
-
-    Object.assign(headers, datas.getRemains(data, [
-        'server', 'date', 'content-type', 'connection', 'expires',
+    const hdrContent = [
+        'content-type', 'content-encoding', 'connection', 'expires',
         'transfer-encoding', 'cache-control', 'pragma', 'set-cookie',
         'strict-transport-security', 'x-content-type-options', 'vary',
-        'content-length', 'content-encoding',
-    ]));
+    ];
+
+    const formats = {
+        'content-length': val => val > 0 ?`${val} bytes` :null,
+        'content-type': val => getContentType(val, CONT_SEPARATOR),
+        'cache-control': val => getCacheType(data),
+        'connection': val => null,
+        'set-cookie': val => datas.isEmpty(val) ?null :'cookie',
+        'expires': val => null,
+        'pragma': val => null,
+        'vary': val => null,
+    };
+
+    const serverInfo = formatHeaderItems(data, hdrServer, formats, colors);
+    serverInfo.length>0 && info.push(util.format('%s%s\n', indent, serverInfo.join(HEAD_SEPARATOR)));
+
+    const contentInfo = formatHeaderItems(data, hdrContent, formats, colors);
+    contentInfo.length>0 && info.push(util.format('%s%s\n', indent, contentInfo.join(CONT_SEPARATOR)));
+
+    Object.assign(headers, datas.getItemsExcept(data, [].concat(hdrServer, hdrContent)));
 
     for (const key in headers) {
-        let str = Array.isArray(headers[ key ])
+        let val = Array.isArray(headers[ key ])
             ? headers[ key ].join('\n' + indent + ' '.repeat(key.length + 2))
             : headers[ key ]
         ;
 
-        colors && (str = paint(key, str, colors));
-        info.push(util.format('%s%s: %s\n', indent, datas.textCapital(key), str));
+        const title = util.format('%s: ', datas.textCapital(key));
+        // val = cropToChunks(title, val, indent);
+
+        colors && (val = paint(key, val, colors));
+        info.push(util.format('%s%s%s\n', indent, title, val));
     }
 
     return info;
+}
+
+function cropToChunks(title, val, indent, max=false) {
+    const topLineLimit = BLOCK_LIMIT - (indent.length + title.length);
+    const subLineLimit = BLOCK_LIMIT - indent.length;
+    // const indentSubLine = ' '.repeat(indent.length + title.length);
+
+    const value = max ?val.substr(0, max) :val;
+
+    const chunks = [];
+    let topLine = value.substr(0, topLineLimit);
+    let subLine = value.substr(topLineLimit);
+    let substr = '';
+    let start = 0;
+
+    while (substr = subLine.substr(start, subLineLimit)) {
+        chunks.push(substr);
+        start += subLineLimit;
+    }
+
+    return util.format('%s\n%s', topLine, chunks.join(`${ indent }\n`));
 }
 
 function getCacheType(data) {
@@ -128,13 +131,13 @@ function getCacheType(data) {
     return cacheType;
 }
 
-function getContentType(data, key='content-type') {
-    const types = [];
-    let chunks = data.hasOwnProperty(key) ?data[key].split(';') :[];
-
-    if (! data.hasOwnProperty(key)) {
-        return types;
+function getContentType(val, separator=', ') {
+    if (datas.isEmpty(val)) {
+        return '';
     }
+
+    let chunks = val.split(';');
+    const types = [];
 
     if (chunks.length > 0) {
         types.push(chunks.shift().trim().split('/')[1]);
@@ -149,38 +152,7 @@ function getContentType(data, key='content-type') {
         });
     }
 
-    return types;
-}
-
-getRequestInfo.formatData = function(data, indentNum=2) {
-    const indent = ' '.repeat(indentNum);
-    const info = [];
-
-    if (typeof(data) == 'object' && data !== null) {
-        for (const key in data) {
-            let str = Array.isArray(data[ key ])
-                ? data[ key ].join('\n' + indent + ' '.repeat(key.length + 2))
-                : data[ key ]
-            ;
-
-            // info.push(util.format('\x1B[96m%s%s\x1B[0m: %s\n', indent, key.toUpperCase(), str));
-            // info.push(util.format('\x1B[36m%s%s\x1B[0m: %s\n', indent, key.toUpperCase(), str));
-            // info.push(util.format('\x1B[38;05;130m%s%s\x1B[0m: %s\n', indent, key.toUpperCase(), str));
-            // info.push(util.format('\x1B[38;05;035m%s%s\x1B[0m: %s\n', indent, key.toUpperCase(), str));
-            // info.push(util.format('\x1B[38;05;161m%s%s\x1B[0m: %s\n', indent, key.toUpperCase(), str));
-            // info.push(util.format('\x1B[38;05;202m%s%s\x1B[0m: %s\n', indent, key.toUpperCase(), str));
-            info.push(util.format('\x1B[38;05;106m%s%s\x1B[0m: %s\n', indent, key.toUpperCase(), str));
-        }
-    }
-    else if (typeof(data) == 'string') {
-
-        info.push(util.format('\x1B[38;05;106m%s%s\x1B[0m: %s\n', indent, key.toUpperCase(), str));
-
-    } else {
-        info.push(data);
-    }
-
-    return info;
+    return types.join(separator);
 }
 
 function getRequestInfo(response, indentNum=2, colors) {
@@ -195,25 +167,26 @@ function getRequestInfo(response, indentNum=2, colors) {
     // const path   = colors ?paint('path', res.req.path, colors) :res.req.path;
 
     info.push(util.format('%s %s %s\n', status, method, path));
-    info = info.concat(formatOptions(headers, indentNum, colors));
+    info = info.concat(formatHeaders(headers, indentNum, colors));
     info.push('\n');
-    // info = info.concat(getRequestInfo.formatData(parsedData.values ?parsedData.values :parsedData, indentNum, colors));
 
     // return info.join('') + '\n\n';
     return info.join('');
 }
 
 getRequestInfo.file = function(response, indentNum=2) {
-    const filename = getPageID(response.options);
-    const fileData = `./data/cache/${filename}.data`;
-    const fileRaw  = `./data/cache/${filename}.raw`;
+    // const fileData = `./data/cache/${filename}.data`;
+    // const filename = 'dump-' + (new Date().toISOString()).replace(/\W/g,'');
+    // const destination  = `./data/cache/${filename}.raw`;
+    // const body = datas.isObject(response.body) 
+    //     ? JSON.stringify(response.body, null, 4) 
+    //     : response.body
+    // ;
 
-    const body = datas.isObject(response.body) 
-        ? JSON.stringify(response.body, null, 4) 
-        : response.body
-    ;
+    const destination  = `./dump.log`;
+    const body = getRequestInfo(response, indentNum);
 
-    fs.writeFile(fileRaw, body, 'utf8', function(err) {
+    fs.appendFile(destination, body, 'utf8', function(err) {
         if (err) return console.error(err);
         // console.log('File saved to:', destination);
     });
@@ -221,30 +194,21 @@ getRequestInfo.file = function(response, indentNum=2) {
 
 getRequestInfo.stdout = function(response, indentNum=2, colors) {
     if (!colors) {
-        colors = DEFAULT_COLORS;
-        Object.assign(colors, {
+        colors = {
+            'default': 'gray',
+            'content-type': '029',
+            'content-encoding': '029',
+            'transfer-encoding': '029',
+            'set-cookie': '029',
+            'separator-head': '236',
+            'separator-cont': '236',
+            'method': 'white',
             'statusCode': paintStatusCode,
-            // 'path': paintPath,
-        });
+        };
     }
 
     const content = getRequestInfo(response, indentNum, colors);
     process.stdout.write(content);
-}
-
-function getPageID(options) {
-    const { host, path } = options;
-    let alias = host + path.split('?').shift();
-
-    if (alias[alias.length-1] == '/') {
-        alias = alias.substr(0, alias.length-1);
-    }
-
-    return alias
-        .replace(/^www\./, '')
-        .replace(/\W/g, '.')
-        .replace(/\.+/g, '.')
-    ;
 }
 
 function paintStatusCode(val) {
@@ -253,14 +217,14 @@ function paintStatusCode(val) {
     }
 
     else if (val>299 && val<400) {
-        return 'yellow';
+        return 'brown';
     }
 
-    else if (val>399 && val<500) {
+    else if (val>399) {
         return 'red';
     }
 
-    return 'default';
+    return 'gray';
 }
 
 module.exports = getRequestInfo;
