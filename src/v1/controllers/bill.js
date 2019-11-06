@@ -8,13 +8,18 @@ const { fail, done } = require('../middleware/process');
 const config = require('../../config.json');
 const crypt = require('../middleware/crypt');
 const datas = require('../middleware/datas');
-const portmone = require('../middleware/portmone');
-const privatbank = require('../middleware/privatbank');
+const colors = require('../middleware/colors');
+const formatter = require('../middleware/formatter');
+const Brequest = require('../middleware/Brequest')();
+const PortmoneAPI = require('../middleware/PortmoneAPI');
 const CACHE_FILE_MASK = './data/cache/%s.data';
 
+const API = new PortmoneAPI(config, Brequest);
+API.on('api-error', onApiError);
+API.on('api-data', onApiData);
+
 async function rtBill(req, res) {
-    const { amount, secret, authKey, MM, YY, cvv2, card_number } = req.body;
-    const { choords, kyivstar } = config;
+    const { secret, authKey, MM, YY, cvv2, card_number } = req.body;
     let CCARD;
 
     if (! validateBillBody(req.body)) {
@@ -37,55 +42,38 @@ async function rtBill(req, res) {
         CCARD = JSON.parse(jsonData);
     }
 
-    CCARD.card_number_mask = datas.getMaskCardN16(CCARD.card_number);
-
-    const bill_amount = Number.parseInt(amount, 10) || 0;
+    const currency = 'UAH';
+    const amount = Number.parseInt(req.body.amount, 10) || 0;
     const phone = datas.parseMobilePhone(req.body.phone);
-    const fp = crypt.md5(new Date().toISOString());
-    const location = choords[ datas.randomInt(0, choords.length-1) ];
 
-    const pbPayData = {
-        lat: location.lat, 
-        lng: location.lng,
-        fp, 
-    };
-
-    const pmPayData = Object.assign({}, CCARD, kyivstar, {
-        phone: datas.getMaskFrom(phone, '+XXX XX XXX XX XX'),
-        description: phone.slice(-9),
-        currencyAPay: 'UAH',
-        bill_amount,
-        fp, 
-    });
-
-    portmone.promo(phone, kyivstar)
-        .then(desc => portmone.form(config.params))
-        .then(form => portmone.pay(form, pmPayData))
-        .then(form => privatbank.form(form))
-        .then(form => privatbank.pay(form, pbPayData))
-        .then(jsid => done(res, { jsid, location }))
-        // .then(data => console.log(data))
+    API.bill(currency, amount, phone, CCARD)
+        .then(data => done(res, data))
         .catch(err => fail(res, err))
     ;
 }
 
 function rtCheckPin(req, res) {
-    const { pin, sid } = req.body;
+    const { pin } = req.body;
 
-    if (! validatePinBody(req.body)) {
+    if (! validatePinBody(pin)) {
         return fail(res, 'Wrong parameters');
     }
 
-    privatbank.sendPin(pin, sid)
-        .then(form => portmone.confirm(form))
-        .then(form => portmone.done(form))
-        .then((success, body) => {
-            console.log('  Success: %s', success ?'true': 'false');
-            success ?done(res) :fail(res);
-            !success && console.log(body);
+    API.checkPin(pin)
+        .then(response => {
+            const { name, lat, lng } = API.location;
+            const statusMsg = util.format('%s Payment successful!', colors.green('✔'));
+
+            console.log('  %s\n    %s  (%s, %s)', statusMsg, name, lat, lng);
+            done(res);
         })
-        // .then(stat => console.log(stat))
-        .catch(err => fail(res, err))
+        .catch(response => {
+            const { name, lat, lng } = API.location;
+            const statusMsg = util.format('%s Payment failed!', colors.red('✖'));
+
+            console.log('  %s\n    %s  (%s, %s)', statusMsg, name, lat, lng);
+            fail(res, 'unknown error');
+        })
     ;
 }
 
@@ -150,12 +138,8 @@ function validateBillBody(body) {
     return HAS_PAYMENT ?HAS_CARD_DATA||HAS_AUTH :false;
 }
 
-function validatePinBody(body) {
-    const { pin } = body;
-    return pin
-        ? /\d{6,}/.test(pin)
-        : false
-    ;
+function validatePinBody(pin) {
+    return pin ? /\d{6,}/.test(pin) :false;
 }
 
 async function verifyAuth(data, key, config, decode='base64') {
@@ -194,6 +178,60 @@ async function loadData(authKey) {
     }
 
     return data;
+}
+
+function onApiError(err, scenario) {
+    console.error(scenario, err);
+}
+
+function onApiData(data, response, scenarios) {
+    const indentWidth = 4;
+    const frameWidth = process.stdout.columns - indentWidth * 2;
+    const [ currScenario, nextScenario ] = scenarios;
+
+    // console.log(this);
+    // process.exit(0);
+
+    if (!onApiData.dumpfile) {
+        onApiData.dumpfile = util.format(CACHE_FILE_MASK, Date.now());
+    }
+
+    try {
+        const values = data.hasOwnProperty('values') ?data.values :data;
+        const textHeadersColored = formatter.headerData(response.res, response.options) 
+            + '\n' + formatter.tree(values, indentWidth, frameWidth, treeCallback) 
+            + '\n\n'
+        ;
+
+        const textHeaders = formatter.headerData(response.res, response.options) 
+            + '\n' + formatter.tree(values, indentWidth, frameWidth) 
+            + '\n\n'
+        ;
+
+        const dumpfile = util.format(CACHE_FILE_MASK, currScenario);
+        const textBody = typeof(response.body) == 'string' 
+            ? response.body 
+            : JSON.stringify(response.body, null, 4)
+        ;
+
+        fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
+        fs.appendFile(onApiData.dumpfile, textHeaders, 'utf8', err => err && console.error(err));
+        process.stdout.write(textHeadersColored);
+        // process.exit(0);
+
+    } catch (err) {
+        console.error(err);
+    }
+
+    if (currScenario == API.DONE) {
+        onApiData.dumpfile = false;
+    }
+}
+
+function treeCallback(val, key) {
+    return colors('023', key.toUpperCase()) + colors.gray(`: ${val}`);
+    // return colors('244', key.toUpperCase()) + colors.gray(`: ${val}`);
+    // return colors('106', key.toUpperCase()) + colors.gray(`: ${val}`);
 }
 
 module.exports = {
