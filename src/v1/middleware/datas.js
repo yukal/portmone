@@ -43,12 +43,12 @@ function assignObjects() {
     return object;
 }
 
-function getRemains(obj, blacklist=[]) {
-    const remains = {};
+function getItemsExcept(obj, exceptions=[]) {
+    const items = {};
     Object.keys(obj).map(key => {
-        blacklist.indexOf(key)===-1 && (remains[ key ] = obj[ key ]);
+        exceptions.indexOf(key)===-1 && (items[ key ] = obj[ key ]);
     })
-    return remains;
+    return items;
 }
 
 function randomNumbers(len=4, prefix='') {
@@ -163,12 +163,12 @@ function getDataFrom(obj, path='') {
     const pathChunks = path ?path.split('.') :[];
     let currentPath = obj;
     let currentKey;
-    let data = '';
+    let data = null;
 
     try {
         while (currentKey = pathChunks.shift()) {
             if (! currentPath.hasOwnProperty(currentKey)) {
-                console.error('Key "%s" not found in object', currentKey);
+                // console.error('Key "%s" not found in object', currentKey);
                 currentPath = false;
                 break;
             }
@@ -177,14 +177,33 @@ function getDataFrom(obj, path='') {
         currentPath && (data = currentPath);
 
     } catch(err) {
-        return '';
+        return null;
     }
 
     return data;
 }
 
-function textCapital(name) {
-    return name.split('-').map(s => s[0].toUpperCase() + s.substr(1).toLowerCase()).join('-');
+function textCapital(name, sep='-') {
+    return name.split(sep).map(s => s[0].toUpperCase() + s.substr(1).toLowerCase()).join(sep);
+}
+
+function isEmpty(data) {
+    for (const empty of [undefined, null, '']) {
+        if (data === empty) return true;
+    }
+
+    if (typeof(data) == 'object') {
+        return Array.isArray(data) 
+            ? data.length < 1
+            : Object.keys(data).length < 1
+        ;
+    }
+
+    else if (Number.isNaN(data)) {
+        return true;
+    }
+
+    return false;
 }
 
 module.exports = {
@@ -193,8 +212,9 @@ module.exports = {
     getDataFrom,
     getMaskFrom,
     getMaskCardN16,
-    getRemains,
+    getItemsExcept,
     getSessionID,
+    isEmpty,
     isJSON,
     isFunction,
     isObject,
