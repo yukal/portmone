@@ -2,6 +2,8 @@ const URL = require('url');
 const https = require('https');
 const http = require('http');
 const zlib = require('zlib');
+const iconv = require('iconv-lite');
+// iconv.extendNodeEncodings();
 const { isObject, cloneObject } = require('./datas');
 
 const NOD_USER_AGENT = "Brequest v1.0";
@@ -39,8 +41,8 @@ function request(options, data) {
     options.headers['Accept-Encoding'] = Object.keys(decoders).join(', ');
 
     return new Promise((resolve, reject) => {
-        const chunks = [];
         const resolveData = { options, data };
+        const chunks = [];
 
         const req = RequestModule.request(options, res => {
             res.on('data', chunk => chunks.push(chunk));
@@ -64,19 +66,19 @@ function request(options, data) {
     });
 }
 
-request.finish = function(res, err, body, resolveData, resolve, reject) {
+request.finish = function(res, err, bodyBuff, resolveData, resolve, reject) {
+    if (err) {
+        console.error(err);
+        return reject(null);
+    }
+
     resolveData.res = res;
 
-    if ((res.headers || {}).hasOwnProperty('set-cookie')) {
+    if (res.headers.hasOwnProperty('set-cookie')) {
         const host = getHostFrom(resolveData.options.host);
         const cookies = res.headers['set-cookie'];
         request.cookies = { host, cookies };
         // console.log(getCookieValues(request.cookies[host]));
-    }
-
-    if (err) {
-        console.error(err);
-        return reject(err);
     }
 
     // if (res.statusMessage != 'OK')
@@ -88,7 +90,7 @@ request.finish = function(res, err, body, resolveData, resolve, reject) {
     }
 
     const contentType = res.headers['content-type'] || '';
-    resolveData.body = decodeBody(body.toString(), contentType);
+    resolveData.body = decodeBody(bodyBuff, contentType);
     request.reporters.map(rep => rep(resolveData));
 
     return resolve(resolveData);
@@ -158,17 +160,35 @@ function encodeURI(obj) {
     return uriChunks.join('&');
 }
 
-function decodeBody(body, contentType='') {
-    if (contentType.indexOf('application/json') > -1) {
-        try {
-            return JSON.parse(body);
-        }
-        catch(error) {
-            console.error(error);
+function decodeBody(buff, contentType='') {
+    const chunks = contentType.split(';');
+    const ctype = chunks.shift().trim().toLowerCase();
+    const settings = {};
+    let body = buff;
+
+    chunks.map(item => {
+        let [ key, value ] = item.split('=');
+        settings[ key.trim().toLowerCase() ] = value.trim();
+    });
+
+    if (settings.hasOwnProperty('charset')) {
+        if (['utf8','utf-8'].indexOf(settings.charset) == -1) {
+            body = iconv.encode(iconv.decode(buff, settings.charset), 'utf8');
         }
     }
 
-    return body;
+    switch(ctype) {
+        case 'application/json':
+            try {
+                return JSON.parse(body);
+            }
+            catch(error) {
+                console.error(error);
+            }
+            break;
+    }
+
+    return body.toString();
 }
 
 function getHostFrom(host) {
