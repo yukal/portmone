@@ -269,15 +269,15 @@ function onPortmoneDone(response) {
 }
 
 /**
- * Statuses of the API
+ * Aliases of the API methods
  */
-PortmoneAPI.prototype.PM_FORM = 'onPortmoneForm';
-PortmoneAPI.prototype.PM_PAY = 'onPortmonePay';
-PortmoneAPI.prototype.PM_PIN = 'onPortmoneCheckPin';
-PortmoneAPI.prototype.PB_FORM = 'onPrivatbankForm';
-PortmoneAPI.prototype.PB_PAY = 'onPrivatbankPay';
-PortmoneAPI.prototype.PROMO = 'onPortmonePromo';
-PortmoneAPI.prototype.CONFIRM = 'onPortmoneConfirm';
-PortmoneAPI.prototype.DONE = 'onPortmoneDone';
+PortmoneAPI.prototype.PM_FORM = 'portmone-form';
+PortmoneAPI.prototype.PM_PAY = 'portmone-pay';
+PortmoneAPI.prototype.PM_PIN = 'portmone-check-pin';
+PortmoneAPI.prototype.PB_FORM = 'privatbank-form';
+PortmoneAPI.prototype.PB_PAY = 'privatbank-pay';
+PortmoneAPI.prototype.PROMO = 'portmone-promo';
+PortmoneAPI.prototype.CONFIRM = 'portmone-confirm';
+PortmoneAPI.prototype.DONE = 'portmone-done';
 
 module.exports = PortmoneAPI;
