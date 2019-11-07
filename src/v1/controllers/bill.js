@@ -180,17 +180,13 @@ async function loadData(authKey) {
     return data;
 }
 
-function onApiError(err, scenario) {
-    console.error(scenario, err);
+function onApiError(err) {
+    console.error(arguments.callee.name, err);
 }
 
-function onApiData(data, response, scenarios) {
+function onApiData(data, response) {
     const indentWidth = 4;
     const frameWidth = process.stdout.columns - indentWidth * 2;
-    const [ currScenario, nextScenario ] = scenarios;
-
-    // console.log(this);
-    // process.exit(0);
 
     if (!onApiData.dumpfile) {
         onApiData.dumpfile = util.format(CACHE_FILE_MASK, Date.now());
@@ -208,7 +204,7 @@ function onApiData(data, response, scenarios) {
             + '\n\n'
         ;
 
-        const dumpfile = util.format(CACHE_FILE_MASK, currScenario);
+        const dumpfile = util.format(CACHE_FILE_MASK, API.currScenarioAlias);
         const textBody = typeof(response.body) == 'string' 
             ? response.body 
             : JSON.stringify(response.body, null, 4)
@@ -217,13 +213,12 @@ function onApiData(data, response, scenarios) {
         fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
         fs.appendFile(onApiData.dumpfile, textHeaders, 'utf8', err => err && console.error(err));
         process.stdout.write(textHeadersColored);
-        // process.exit(0);
 
     } catch (err) {
-        console.error(err);
+        console.error(arguments.callee.name, err);
     }
 
-    if (currScenario == API.DONE) {
+    if (API.currScenarioAlias == API.DONE) {
         onApiData.dumpfile = false;
     }
 }
