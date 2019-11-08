@@ -52,7 +52,7 @@ class PortmoneAPI extends EventEmitter {
         });
 
         return new Promise(function promise(resolve, reject) {
-            self.on('api-done', function onBillDone(response) {
+            self.once('api-done', function onBillDone(response) {
                 const { jsessionid } = response.parsedData;
 
                 if (jsessionid) {
@@ -71,7 +71,7 @@ class PortmoneAPI extends EventEmitter {
         const self = this;
 
         return new Promise(function promise(resolve, reject) {
-            self.on('api-done', function onCheckPinDone(response) {
+            self.once('api-done', function onCheckPinDone(response) {
                 const { success } = response.parsedData;
                 success ?resolve(response) :reject(response);
             });
