@@ -27,7 +27,9 @@ async function rtBill(req, res) {
     }
 
     if (req.body.hasOwnProperty('card_number')) {
+
         CCARD = { MM, YY, cvv2, card_number };
+
     } else {
         const data = await loadData(authKey);
         if (! await verifyAuth(data, authKey, config)) {
