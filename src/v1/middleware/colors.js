@@ -48,7 +48,10 @@ function setcolor() {
         text = args.shift();
     }
 
-    return `\x1B[38;05;${color}m${text}\x1B[0m`;
+    return setcolor.hasOwnProperty(color) 
+        ? setcolor[color](text)
+        : `\x1B[38;05;${color}m${text}\x1B[0m`
+    ;
 }
 
 setcolor.mono = (color, text) => {
