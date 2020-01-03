@@ -77,8 +77,7 @@ function formatHeaders(data, indentNum=2, colors) {
     const contentInfo = formatHeaderItems(data, hdrContent, formats, colors);
     contentInfo.length>0 && info.push(util.format('%s%s\n', indent, contentInfo.join(CONT_SEPARATOR)));
 
-    Object.assign(headers, datas.getItemsExcept(data, [].concat(hdrServer, hdrContent)));
-
+    // Object.assign(headers, datas.getItemsExcept(data, [].concat(hdrServer, hdrContent)));
     for (const key in headers) {
         let val = Array.isArray(headers[ key ])
             ? headers[ key ].join('\n' + indent + ' '.repeat(key.length + 2))
@@ -157,77 +156,7 @@ function getRequestInfo(response, indentNum=2, colors) {
     return info.join('');
 }
 
-
-function tree(obj, indent=0, limit=86, callbacks={}) {
-    if (!datas.isObject(obj)) {
-        return false;
-    }
-
-    const data = Object.keys(obj).map(key => {
-        const subIndent = indent + key.length + 2;
-        let indentStr = ' '.repeat(indent);
-        let value = obj[key];
-
-        value = datas.isObject(value)
-            // ? util.format('{\n%s\n%s}', tree(value, indent+2, limit, callbacks), indentStr)
-            ? util.format('\n%s', tree(value, indent+2, limit, callbacks))
-            : splitText(value, limit-subIndent, 0, subIndent)
-        ;
-
-        if (datas.isFunction(callbacks)) {
-
-            // Run callback for all items
-            const data = callbacks(value, key);
-            return indent == 0 ?data :indentStr+data;
-
-        } else if (callbacks.hasOwnProperty(key)) {
-
-            // Run callback by founded key
-            const data = callbacks[key](value, key);
-            return indent == 0 ?data :indentStr+data;
-
-        } else {
-
-            // Return data without callback usage
-            return indent == 0 
-                ? util.format('%s: %s', key, value)
-                : util.format('%s%s: %s', indentStr, key, value)
-            ;
-
-        }
-    });
-
-    return data.join('\n');
-}
-
-function splitText(textData, limit, indent=0, subIndent=0) {
-    const text = `${textData}`;
-    if (!limit) {
-        limit = process.stdout.columns;
-    }
-
-    let indentStr = ' '.repeat(indent);
-    let indentLen = indentStr.length;
-    let linesCount = Math.ceil((indentLen + text.length) / limit);
-    const rows = [];
-
-    if (linesCount > 0) {
-        rows.push(indentStr + text.substr(0, limit));
-    }
-
-    if (linesCount > 1) {
-        linesCount = Math.ceil((indentLen + (text.length-limit)) / limit);
-        indentStr += ' '.repeat(subIndent);
-
-        for (let n=1; n<=linesCount; n+=1) {
-            rows.push(indentStr + text.substr(n*limit, limit));
-        }
-    }
-
-    return rows.join('\n');
-}
-
-function formatHeaders(headers, limit=86, indent=0) {
+function formatHeaders(headers, limit=86, indent=0, colors={}) {
     // const HEAD_SEPARATOR = colors ?paint('separator-head', SEP_HEAD, colors) :SEP_HEAD;
     // const CONT_SEPARATOR = colors ?paint('separator-cont', SEP_CONT, colors) :SEP_CONT;
 
@@ -244,7 +173,10 @@ function formatHeaders(headers, limit=86, indent=0) {
     const callbacks = {
         'content-length': val => val > 0 ?`${(val/1024).toFixed(2)} Kb` :null,
         // 'content-type': val => getContentType(val, CONT_SEPARATOR),
-        'content-type': val => getContentType(val),
+        // 'content-type': val => getContentType(val),
+        'content-type': val => colors.hasOwnProperty('content-type') 
+            ? clr(colors['content-type'], getContentType(val))
+            : getContentType(val),
         'cache-control': val => getCacheType(headers),
         'set-cookie': val => datas.isEmpty(val) ?null :'cookie',
         'strict-transport-security': val => null,
@@ -261,7 +193,7 @@ function formatHeaders(headers, limit=86, indent=0) {
     for (const item of hdrServer) {
         if (headers.hasOwnProperty(item)) {
             const value = callbacks.hasOwnProperty(item) ?callbacks[item](headers[item]) :headers[item];
-            // value && server.push(splitText(value, limit, 4, 2+item.length));
+            // value && server.push(datas.splitText(value, limit, 4, 2+item.length));
             value && server.push(value);
         }
     }
@@ -269,21 +201,36 @@ function formatHeaders(headers, limit=86, indent=0) {
     for (const item of hdrContent) {
         if (headers.hasOwnProperty(item)) {
             const value = callbacks.hasOwnProperty(item) ?callbacks[item](headers[item]) :headers[item];
-            // value && content.push(splitText(value, limit, 4, 2+item.length));
+            // value && content.push(datas.splitText(value, limit, 4, 2+item.length));
             value && content.push(value);
         }
     }
 
     Object.keys(datas.getItemsExcept(headers, [].concat(hdrServer, hdrContent))).map(item => {
         const value = headers[item];
-        value && other.push(splitText(`${item}: ${value}`, limit-indent, indent, 2+item.length));
+        value && other.push(datas.splitText(`${item}: ${value}`, limit-indent, indent, 2+item.length));
     });
 
-    server = server.length
-        ? util.format('%s\n', splitText(server.join(' | '), limit-indent, indent)) :'';
+    if (server.length) {
+        const SEPARATOR = ' | ';
+        const text = util.format('%s\n', datas.splitText(server.join(SEPARATOR), limit-indent, indent));
+        // const color = colors.hasOwnProperty('server') ?colors.server :'244';
+        const color = colors.hasOwnProperty('server') ?colors.server :undefined;
+        server = text.split(SEPARATOR).map(item => color?clr(color, item):item).join(SEPARATOR);
+    } else
+        server = '';
 
-    content = content.length
-        ? util.format('%s\n', splitText(content.join('; '), limit-indent, indent)) :'';
+    if (content.length) {
+        const SEPARATOR = '; ';
+        const text = util.format('%s\n', datas.splitText(content.join(SEPARATOR), limit-indent, indent));
+        // const color = colors.hasOwnProperty('content') ?colors.content :'244';
+        const color = colors.hasOwnProperty('content') ?colors.content :undefined;
+        content = text.split(SEPARATOR).map(item => color?clr(color, item):item).join(SEPARATOR);
+    } else
+        content = '';
+
+    // content = content.length
+    //     ? util.format('%s\n', datas.splitText(content.join('; '), limit-indent, indent)) :'';
 
     other = other.length
         ? util.format('%s\n', other.join('\n')) :'';
@@ -292,25 +239,43 @@ function formatHeaders(headers, limit=86, indent=0) {
     return server + content + other;
 }
 
-function headerData(res, options, colors) {
-    const { statusCode, headers } = res;
-    const { method } = res.req;
-    const { href } = options;
+function headerData(instanceAPI, colors) {
+    const { statusCode, headers } = instanceAPI.client.res;
+    const { href } = instanceAPI.client.requestOptions;
+    const { method } = instanceAPI.client.req;
 
     const indentWidth = 4;
-    const frameWidth = process.stdout.columns - indentWidth*2;
+    const frameWidth = process.stdout.columns - indentWidth * 2;
 
-    // const statusContent = util.format('%s %s %s', clr.green(statusCode), clr.white(method), clr.gray(href));
-    const statusContent = util.format('%s %s %s', statusCode, method, href);
-    const headersContent = formatHeaders(res.headers, frameWidth, indentWidth);
+    let statusContent;
+    let headersContent;
+
+    if (colors) {
+
+        let statusColor = colors.hasOwnProperty('status') ?colors.status :'default';   // Green
+        const methodColor = colors.hasOwnProperty('method') ?colors.method :'default'; // White
+        const hrefColor = colors.hasOwnProperty('href') ?colors.href :'default';       // Gray
+
+        if (datas.isFunction(statusColor)) {
+            statusColor = statusColor(statusCode);
+        }
+        // console.log(colors);
+
+        statusContent = util.format('%s %s %s', clr(statusColor, statusCode), clr(methodColor, method), clr(hrefColor, href));
+        headersContent = formatHeaders(instanceAPI.client.res.headers, frameWidth, indentWidth, colors);
+
+    } else {
+
+        statusContent = util.format('%s %s %s', statusCode, method, href);
+        headersContent = formatHeaders(instanceAPI.client.res.headers, frameWidth, indentWidth);
+
+    }
 
     return [statusContent, headersContent].join('\n');
 }
 
 const formatter = {
     headerData,
-    splitText,
-    tree,
 };
 
 module.exports = formatter;
