@@ -16,18 +16,66 @@ const decoders = {
     br: 'brotliDecompress',
 };
 
+class Brequest {
+    constructor() {
+        // this.cookies = {};
+        Object.defineProperties(this, {
+            cookies: {
+                get: () => getCookies.call(this),
+                set: val => setCookies.call(this, val),
+            },
+        });
+    }
+
+    get(url, headers) {
+        const options = getOptions('GET', url, headers);
+        return request.call(this, options);
+    }
+    
+    post(url, data, headers) {
+        const options = getOptions('POST', url, headers);
+        return request.call(this, options, data);
+    }
+    
+    postXHR(url, data, headers={}) {
+        headers['X-Requested-With'] = 'XMLHttpRequest';
+        const options = getOptions('POST', url, headers);
+        return request.call(this, options, data);
+    }
+    
+    postJSON(url, data, headers={}) {
+        headers['Content-Type'] = 'application/json; charset=utf-8';
+        const options = getOptions('POST', url, headers);
+        return request.call(this, options, JSON.stringify(data));
+    }
+}
+
+Brequest.prototype.encodeURI = function encodeURI(obj) {
+    let uriChunks = [];
+    for (const key in obj) {
+        const data = obj[key] !== null && typeof obj[key] == 'object'
+            ? JSON.stringify(obj[key]) 
+            : obj[key]
+        ;
+        const uriChunk = key + '=' + encodeURIComponent(data);
+        uriChunks.push(uriChunk);
+    }
+    return uriChunks.join('&');
+}
+
 function request(options, data) {
+    const self = this;
     const RequestModule = options.protocol === 'https:'? https: http;
     const host = getHostFrom(options.host);
     let postData = null;
 
-    if (request.cookies.hasOwnProperty(host)) {
-        options.headers.Cookie = getCookieValues(request.cookies[ host ]).join('; ');
+    if (this.cookies.hasOwnProperty(host)) {
+        options.headers.Cookie = getCookieValues.call(this, host).join('; ');
     }
 
     if (data) {
         if (! options.headers.hasOwnProperty('Content-Type')) {
-            postData = encodeData(data);
+            postData = isObject(data) ?this.encodeURI(data) :data;
             options.headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=utf-8';
         } else {
             postData = data;
@@ -39,88 +87,71 @@ function request(options, data) {
     }
 
     options.headers['Accept-Encoding'] = Object.keys(decoders).join(', ');
+    this.requestOptions = options;
+    this.requestData = data;
 
     return new Promise((resolve, reject) => {
-        const resolveData = { options, data };
         const chunks = [];
 
-        const req = RequestModule.request(options, res => {
+        self.req = RequestModule.request(options, res => {
+            self.res = res;
+
             res.on('data', chunk => chunks.push(chunk));
             res.on('end', () => {
-                const encoding = (res.headers['content-encoding'] || '').toLowerCase();
-                const decompress = decoders.hasOwnProperty(encoding) ?zlib[decoders[ encoding ]] :false;
                 const buffer = Buffer.concat(chunks);
+
+                const contentEncoding = res.headers.hasOwnProperty('content-encoding')
+                    ? res.headers['content-encoding'].toLowerCase() : '';
+
+                const decompress = decoders.hasOwnProperty(contentEncoding) 
+                    ? zlib[decoders[ contentEncoding ]] :false;
 
                 decompress 
                     ? decompress(buffer, (err, decoded) => 
-                      request.finish(res, err, decoded, resolveData, resolve, reject)) 
-                    : request.finish(res, null, buffer, resolveData, resolve, reject)
+                      request.finish.call(self, err, decoded, resolve, reject)) 
+                    : request.finish.call(self, null, buffer, resolve, reject)
                 ;
             });
         });
 
-        postData && req.write(postData);
+        postData && self.req.write(postData);
 
-        req.on('error', err => request.finish(req.res, err, null, resolveData, resolve, reject));
-        req.end(); // !IMPORTANT
+        self.req.on('error', err => request.finish.call(self, err, null, resolve, reject));
+        self.req.end(); // !IMPORTANT
     });
 }
 
-request.finish = function(res, err, bodyBuff, resolveData, resolve, reject) {
+request.COOKIE_KEY = '__cookies';
+
+request.finish = function(err, bodyBuff, resolve, reject) {
+    // const reporters = this.reporters || [];
+
     if (err) {
         console.error(err);
         return reject(null);
     }
 
-    resolveData.res = res;
-
-    if (res.headers.hasOwnProperty('set-cookie')) {
-        const host = getHostFrom(resolveData.options.host);
-        const cookies = res.headers['set-cookie'];
-        request.cookies = { host, cookies };
-        // console.log(getCookieValues(request.cookies[host]));
+    if (this.res.headers.hasOwnProperty('set-cookie')) {
+        const host = getHostFrom(this.requestOptions.host);
+        const cookies = this.res.headers['set-cookie'];
+        this.cookies = { host, cookies };
+        console.log(getCookieValues.call(this, host));
     }
 
-    // if (res.statusMessage != 'OK')
-    if (res.statusCode > 399) {
-        console.error(res.statusCode, res.statusMessage);
-        request.reporters.map(rep => rep(resolveData));
-        resolveData.data && console.log(resolveData.data);
+    // if (this.res.statusMessage != 'OK')
+    if (this.res.statusCode > 399) {
+        console.error(this.res.statusCode, this.res.statusMessage);
+        this.requestData && console.log(this.requestData);
         return reject(null);
     }
 
-    const contentType = res.headers['content-type'] || '';
-    resolveData.body = decodeBody(bodyBuff, contentType);
-    request.reporters.map(rep => rep(resolveData));
+    const contentType = this.res.headers['content-type'] || '';
+    const body = decodeBody(bodyBuff, contentType);
 
-    return resolve(resolveData);
+    return resolve({ body });
 }
 
-request.get = function(url, headers) {
-    const options = setOptions('GET', url, headers);
-    return request(options);
-}
-
-request.post = function(url, data, headers) {
-    const options = setOptions('POST', url, headers);
-    return request(options, data);
-}
-
-request.postXHR = function(url, data, headers={}) {
-    headers['X-Requested-With'] = 'XMLHttpRequest';
-    const options = setOptions('POST', url, headers);
-
-    return request(options, data);
-}
-
-request.postJSON = function(url, data, headers={}) {
-    headers['Content-Type'] = 'application/json; charset=utf-8';
-    const options = setOptions('POST', url, headers);
-
-    return request(options, JSON.stringify(data));
-}
-
-function setOptions(method, url, headersData) {
+function getOptions(method, url, headersData) {
     const headers = isObject(headersData) ?cloneObject(headersData) :{};
 
     if (!headers.hasOwnProperty('User-Agent')) {
@@ -130,37 +161,7 @@ function setOptions(method, url, headersData) {
     return Object.assign({ method, headers }, URL.parse(url));
 }
 
-function encodeData(data) {
-    return isObject(data) ?encodeURI(data) :data;
-}
-
-request.encodeURI = function(obj) {
-    let uriChunks = [];
-    for (const key in obj) {
-        const data = obj[key] !== null && typeof obj[key] == 'object'
-            ? JSON.stringify(obj[key]) 
-            : obj[key]
-        ;
-        const uriChunk = key + '=' + encodeURIComponent(data);
-        uriChunks.push(uriChunk);
-    }
-    return uriChunks.join('&');
-}
-
-function encodeURI(obj) {
-    let uriChunks = [];
-    for (const key in obj) {
-        const data = obj[key] !== null && typeof obj[key] == 'object'
-            ? JSON.stringify(obj[key]) 
-            : obj[key]
-        ;
-        const uriChunk = key + '=' + encodeURIComponent(data);
-        uriChunks.push(uriChunk);
-    }
-    return uriChunks.join('&');
-}
-
-function decodeBody(buff, contentType='') {
+function decodeBody(buff, contentType) {
     const chunks = contentType.split(';');
     const ctype = chunks.shift().trim().toLowerCase();
     const settings = {};
@@ -195,8 +196,9 @@ function getHostFrom(host) {
     return host.replace(/^www\./i, '');
 }
 
-function getCookieValues(parsedCookies) {
-    return Object.keys(parsedCookies).map(key => parsedCookies[key].value);
+function getCookieValues(host) {
+    const cookies = this.cookies[ host ] || {};
+    return Object.keys(cookies).map(key => cookies[key].value);
 }
 
 function parseCookies(cookies) {
@@ -263,41 +265,62 @@ function mergeCookies() {
     return cookies;
 }
 
-module.exports = function init(options={}) {
-    // Define dependencies as readonly object
-    !request.initiated && Object.defineProperties(request, {
-        dependencies: {
-            value: options.hasOwnProperty('dependencies') ?options.dependencies :{}
-        },
-        reporters: {
-            value: options.hasOwnProperty('reporters') ?options.reporters :[],
-            // enumerable: true,
-        },
-        cookies: {
-            get: function getCookies() {
-                if (! request.hasOwnProperty('__cookies')) {
-                    request.__cookies = {};
-                }
-                return request.__cookies;
-            },
-            set: function setCookies(data) {
-                const { host, cookies } = data;
+function getCookies() {
+    if (! this.hasOwnProperty(request.COOKIE_KEY)) {
+        initCookies.call(this);
+    }
+    return this[request.COOKIE_KEY];
+}
 
-                if (! request.hasOwnProperty('__cookies')) {
-                    request.__cookies = {};
+function setCookies(data) {
+    if (data === null) {
+        initCookies.call(this);
+    } else {
+        const { host, cookies } = data;
+        const instance = this.hasOwnProperty(request.COOKIE_KEY) 
+            ? this[ request.COOKIE_KEY ] : initCookies.call(this);
+
+        if (! instance.hasOwnProperty(host)) {
+            instance[ host ] = {};
+        }
+
+        instance[host] = mergeCookies(instance[host], parseCookies(cookies));
+    }
+}
+
+function initCookies(target = request.COOKIE_KEY) {
+    const instance = (this[target] = {});
+
+    return Object.defineProperties(this[target], {
+        // Returns a string with values separated by ";"
+        values: {
+            get: function() {
+                const cookiesList = {};
+
+                for (const host in instance) {
+                    const cookies = instance[ host ];
+                    const items = Object.keys(cookies).map(key => cookies[key].value);
+                    cookiesList[ host ] = items.join('; ');
                 }
 
-                if (! request.__cookies.hasOwnProperty(host)) {
-                    request.__cookies[ host ] = {};
-                }
-
-                request.__cookies[host] = mergeCookies(request.__cookies[host], parseCookies(cookies));
-                // request.__cookies[ host ] = parseCookies(cookies);
-            },
+                return cookiesList;
+            }
         },
+
+        // Returns an array with values
+        items: {
+            get: function() {
+                const cookiesList = {};
+
+                for (const host in instance) {
+                    const cookies = instance[ host ];
+                    cookiesList[ host ] = Object.keys(cookies).map(key => cookies[key].value);
+                }
+
+                return cookiesList;
+            }
+        }
     });
+}
 
-    request.initiated = true;
-    return request;
-    // return cloneObject(request);
-};
+module.exports = Brequest;
