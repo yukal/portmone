@@ -100,18 +100,18 @@ function getMaskCardN16(cn) {
     return '';
 }
 
-function getSessionID(keyPhrase, cookies) {
-    const cookie = Array.isArray(cookies) ?cookies.join(';') :cookies;
-    const re = new RegExp(`${keyPhrase}=([^;]+)`, 'im');
+function getSessionID(keyPhrase, content) {
+    const data = Array.isArray(content) ?content.join(';') :content;
+    // const re = new RegExp(`${keyPhrase}=([^;]+)`, 'im');
+    const re = new RegExp(`${keyPhrase}=([0-9a-z]+)`, 'im');
     let res;
 
-    if (res = cookie.match(re)) {
-        return res[1];
+    if (data) {
+        if (res = data.match(re)) {
+            // console.log(res);
+            return res[1];
+        }
     }
-
-    // if (res = cookie.match(/phpsessid=[^;]+/im)) {
-    //     return res[0]
-    // }
 
     return '';
 }
@@ -206,6 +206,81 @@ function isEmpty(data) {
     return false;
 }
 
+function splitText(textData, limit, indent=0, subIndent=0) {
+    const text = `${textData}`;
+    if (!limit) {
+        limit = process.stdout.columns;
+    }
+
+    let indentStr = ' '.repeat(indent);
+    let indentLen = indentStr.length;
+    let linesCount = Math.ceil((indentLen + text.length) / limit);
+    const rows = [];
+
+    if (linesCount > 0) {
+        rows.push(indentStr + text.substr(0, limit));
+    }
+
+    if (linesCount > 1) {
+        linesCount = Math.ceil((indentLen + (text.length-limit)) / limit);
+        indentStr += ' '.repeat(subIndent);
+
+        for (let n=1; n<=linesCount; n+=1) {
+            rows.push(indentStr + text.substr(n*limit, limit));
+        }
+    }
+
+    return rows.join('\n');
+}
+
+function tree(obj, indent=0, limit=86, callbacks={}) {
+    if (!isObject(obj)) {
+        return false;
+    }
+
+    const data = Object.keys(obj).map(key => {
+        const subIndent = indent + key.length + 2;
+        let indentStr = ' '.repeat(indent);
+        let value = obj[key];
+
+        value = isObject(value)
+            // ? util.format('{\n%s\n%s}', tree(value, indent+2, limit, callbacks), indentStr)
+            ? util.format('\n%s', tree(value, indent+2, limit, callbacks))
+            : splitText(value, limit-subIndent, 0, subIndent)
+        ;
+
+        if (isFunction(callbacks)) {
+
+            // Run callback for all items
+            const data = callbacks(value, key);
+            return indent == 0 ?data :indentStr+data;
+
+        } else if (callbacks.hasOwnProperty(key)) {
+
+            // Run callback by founded key
+            const data = callbacks[key](value, key);
+            return indent == 0 ?data :indentStr+data;
+
+        } else {
+
+            // Return data without callback usage
+            return indent == 0 
+                ? `${key}: ${value}`
+                : `${indentStr}${key}: ${value}`
+            ;
+
+            // return indent == 0 
+            //     ? util.format('%s: %s', key, value)
+            //     : util.format('%s%s: %s', indentStr, key, value)
+            // ;
+
+        }
+    });
+
+    return data.join('\n');
+}
+
+
 module.exports = {
     assignObjects,
     cloneObject,
@@ -222,4 +297,6 @@ module.exports = {
     randomInt,
     randomNumbers,
     textCapital,
+    splitText,
+    tree,
 };
