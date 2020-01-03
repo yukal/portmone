@@ -8,6 +8,18 @@ const Parser = require('./HtmlParser');
 const PM_HOST = 'https://www.portmone.com.ua';
 const PB_HOST = 'https://acs.privatbank.ua';
 
+const API_DATA = {
+    // Shop Site ID
+    ssid: 6044,
+    // Shop Language
+    lang: 'uk',
+    payee: {
+        payee_id: 'KYIVSTAR_P',
+        attribute1: 'P',
+        format: 'json',
+    }
+};
+
 class PortmoneAPI extends EventEmitter {
     constructor(config, client) {
         super();
@@ -24,6 +36,16 @@ class PortmoneAPI extends EventEmitter {
         this.on('api-scenario', onScenario);
     }
 
+    getPortmoneHost(path='', params) {
+        const url = path[0] === '/' ?PM_HOST+path :path;
+        return params ?url+'?'+this.client.encodeURI(params) :url;
+    }
+
+    getPrivatbankHost(path='', params) {
+        const url = path[0] === '/' ?PB_HOST+path :path;
+        return params ?url+'?'+this.client.encodeURI(params) :url;
+    }
+
     bill(currency, amount, phone, CCARD) {
         this.location = this.config.choords[ datas.randomInt(0, this.config.choords.length-1) ];
         this.phone = phone;
@@ -37,12 +59,13 @@ class PortmoneAPI extends EventEmitter {
             }
         }
 
-        Object.assign(this.pmPayData, this.config.kyivstar, CCARD, {
+        Object.assign(this.pmPayData, API_DATA.payee, CCARD, {
             bill_amount: amount,
             currencyAPay: currency.toUpperCase(),
             phone: datas.getMaskFrom(phone, '+XXX XX XXX XX XX'),
             description: phone.slice(-9),
             fp: fingerprint,
+            lang: API_DATA.lang,
         });
 
         Object.assign(this.pbPayData, {
@@ -56,10 +79,9 @@ class PortmoneAPI extends EventEmitter {
                 const { jsessionid } = response.parsedData;
 
                 if (jsessionid) {
-                    resolve({ location: this.location });
+                    resolve({ location: self.location });
                 } else {
-                    reject(null);
-                    console.error('onBillDone', response.body);
+                    reject('no-jsession');
                 }
             });
 
@@ -74,6 +96,9 @@ class PortmoneAPI extends EventEmitter {
             self.once('api-done', function onCheckPinDone(response) {
                 const { success } = response.parsedData;
                 success ?resolve(response) :reject(response);
+
+                // Client Cookies
+                // console.log(self.client.cookies);
             });
 
             onPortmoneCheckPin.call(self, pin);
@@ -106,8 +131,28 @@ class PortmoneAPI extends EventEmitter {
 }
 
 
-function urlPrepend(prefix, url) {
-    return url[0] === '/' ?prefix+url :url;
+function getSID(response, keyName) {
+    let sid;
+
+    if (this.client.res.headers.hasOwnProperty('set-cookie')) {
+        sid = datas.getSessionID(keyName, this.client.res.headers['set-cookie']);
+    }
+
+    if (datas.isEmpty(sid)) {
+        sid = datas.getSessionID(keyName, response.body);
+    }
+
+    if (datas.isEmpty(sid) && (this instanceof PortmoneAPI)) {
+        const host = this.client.requestOptions.host.replace(/^www\./i, '');
+        if (this.client.cookies.hasOwnProperty(host)) {
+            const cookies = this.client.cookies[ host ];
+            const key = Object.keys(cookies).filter(val => val.toLowerCase()==keyName).shift();
+            sid = datas.getSessionID(keyName, cookies[key].value);
+        }
+    }
+
+    return sid;
+    // return sid ?this[keyName]=sid :this[keyName];
 }
 
 function getScenarioAlias(data) {
@@ -118,19 +163,34 @@ function getScenarioAlias(data) {
 }
 
 function setScenariosFrom(args) {
-    const nextScenarios = {
-        'onPortmoneForm': onPortmonePromo,
-        'onPortmonePromo': onPortmonePay,
-        'onPortmonePay': onPrivatbankForm,
-        'onPrivatbankForm': onPrivatbankPay,
-        'onPrivatbankPay': 'done',
-        'onPortmoneCheckPin': onPortmoneConfirm,
-        'onPortmoneConfirm': onPortmoneDone,
-        'onPortmoneDone': 'done',
+    const scenarios = {
+        onPortmoneForm,
+        onPortmonePromo,
+        onPortmonePay,
+        onPrivatbankForm,
+        onPrivatbankPay,
+        onPortmoneCheckPin,
+        onPortmoneConfirm,
+        onPortmoneDone,
     };
 
+    const breaks = [
+        'onPrivatbankPay',
+        'onPortmoneDone'
+    ];
+
+    const scenariosNames = Object.keys(scenarios);
+    const currScenarioIndex = scenariosNames.indexOf(args.callee.name);
+    const nextScenarioName = scenariosNames[ currScenarioIndex+1 ];
+    const prevScenarioName = scenariosNames[ currScenarioIndex-1 ];
+
     this.currScenario = args.callee;
-    this.nextScenario = nextScenarios[ args.callee.name ];
+    this.prevScenario = scenarios[ prevScenarioName ];
+    this.nextScenario = breaks.indexOf(this.currScenario.name)>-1 ?'done' :scenarios[ nextScenarioName ];
+
+    // process.stdout.write('prev '); console.log(this.prevScenario);
+    // process.stdout.write('curr '); console.log(this.currScenario);
+    // process.stdout.write('next '); console.log(this.nextScenario);
 }
 
 function onScenario(response) {
@@ -138,7 +198,7 @@ function onScenario(response) {
     // console.log(this.nextScenario);
 
     if (response) {
-        let parsedData = datas.getDataFrom(response, 'parsedData');
+        const parsedData = datas.getDataFrom(response, 'parsedData');
         this.emit('api-data', parsedData, response);
     }
 
@@ -152,13 +212,24 @@ function onScenario(response) {
 
 function onPortmoneForm() {
     setScenariosFrom.call(this, arguments);
-    const action = util.format('%s/r3/new-kyivstar/?%s', PM_HOST, this.client.encodeURI(this.config.params));
+    const action = this.getPortmoneHost('/r3/new-kyivstar/', {
+        amount: this.pmPayData.bill_amount,
+        shop_site_id: API_DATA.ssid,
+        lang: API_DATA.lang,
+        entity: 'phone',
+    });
 
     this.client.get(action)
         .then(resp => {
             resp.parsedData = new Parser(resp.body).getFormsData('#ptm-form');
-            Object.assign(this.pmPayData, resp.parsedData.values);
-            this.emit('api-scenario', resp);
+
+            if (datas.isObject(resp.parsedData)) {
+                Object.assign(this.pmPayData, resp.parsedData.values);
+                this.emit('api-scenario', resp);
+            } else {
+                const msg = `no-data (${this.currScenarioAlias})`;
+                this.emit('api-error', {msg, response: resp});
+            }
         })
         .catch(err => this.emit('api-error', err))
     ;
@@ -166,13 +237,17 @@ function onPortmoneForm() {
 
 function onPortmonePromo(response) {
     setScenariosFrom.call(this, arguments);
-    const action = util.format('%s/r3/secure/check/kyivstar-promo', PM_HOST);
-    const values = Object.assign({ description: this.phone }, this.config.kyivstar);
+    const action = this.getPortmoneHost('/r3/secure/check/kyivstar-promo');
+    const values = Object.assign({ description: this.phone }, API_DATA.payee);
 
     this.client.postXHR(action, values)
         .then(resp => {
             resp.parsedData = { description: datas.getDataFrom(resp, 'body.response.description') };
-            Object.assign(this.pmPayData, resp.parsedData);
+
+            if (!datas.isEmpty(resp.parsedData.description)) {
+                Object.assign(this.pmPayData, resp.parsedData);
+            }
+
             this.emit('api-scenario', resp);
         })
         .catch(err => this.emit('api-error', err))
@@ -181,13 +256,19 @@ function onPortmonePromo(response) {
 
 function onPortmonePay(response) {
     setScenariosFrom.call(this, arguments);
-    const action = util.format('%s/r3/secure/pay/do-payment', PM_HOST);
+    const action = this.getPortmoneHost('/r3/secure/pay/do-payment');
 
     this.client.post(action, this.pmPayData)
         .then(resp => {
             const html = datas.getDataFrom(resp, 'body.response.form');
             resp.parsedData = new Parser(html).getFormsData('#apiForm');
-            this.emit('api-scenario', resp);
+
+            if (datas.isObject(resp.parsedData)) {
+                this.emit('api-scenario', resp);
+            } else {
+                const msg = `no-data (${this.currScenarioAlias})`;
+                this.emit('api-error', {msg, response: resp});
+            }
         })
         .catch(err => this.emit('api-error', err))
     ;
@@ -195,13 +276,19 @@ function onPortmonePay(response) {
 
 function onPrivatbankForm(response) {
     setScenariosFrom.call(this, arguments);
-    const action = urlPrepend(PB_HOST, response.parsedData.action);
+    const action = this.getPrivatbankHost(response.parsedData.action);
 
     this.client.post(action, response.parsedData.values)
         .then(resp => {
             resp.parsedData = new Parser(resp.body).getFormsData('#form_send');
-            this.pbPayData = Object.assign({}, resp.parsedData.values, this.pbPayData);
-            this.emit('api-scenario', resp);
+
+            if (datas.isObject(resp.parsedData)) {
+                this.pbPayData = Object.assign({}, resp.parsedData.values, this.pbPayData);
+                this.emit('api-scenario', resp);
+            } else {
+                const msg = `no-data (${this.currScenarioAlias})`;
+                this.emit('api-error', {msg, response: resp});
+            }
         })
         .catch(err => this.emit('api-error', err))
     ;
@@ -209,14 +296,23 @@ function onPrivatbankForm(response) {
 
 function onPrivatbankPay(response) {
     setScenariosFrom.call(this, arguments);
-    const action = urlPrepend(PB_HOST, response.parsedData.action);
+    const action = this.getPrivatbankHost(response.parsedData.action);
 
     this.client.post(action, this.pbPayData)
         .then(resp => {
-            resp.parsedData = {
-                jsessionid: datas.getSessionID('jsessionid', resp.res.headers['set-cookie']),
-            };
+            // const jsessionid = getSID.call(this, resp, 'jsessionid');
+            resp.parsedData = { jsessionid: getSID.call(this, resp, 'jsessionid') };
+
             this.emit('api-scenario', resp);
+
+            // if (!datas.isEmpty(resp.parsedData.jsessionid)) {
+            //     this.emit('api-scenario', resp);
+            // } else {
+            //     // this.emit('api-done', resp);
+            //     // this.removeAllListeners('api-done');
+            //     const msg = `no-session (${this.currScenarioAlias})`;
+            //     this.emit('api-error', {msg, response: resp});
+            // }
         })
         .catch(err => this.emit('api-error', err))
     ;
@@ -224,7 +320,7 @@ function onPrivatbankPay(response) {
 
 function onPortmoneCheckPin(pin) {
     setScenariosFrom.call(this, arguments);
-    const action = util.format('%s/pCheckPIN.jsp', PB_HOST);
+    const action = this.getPrivatbankHost('/pCheckPIN.jsp');
     const values = {
         pPasswordID: '',
         pPassword: pin,
@@ -234,7 +330,13 @@ function onPortmoneCheckPin(pin) {
     this.client.post(action, values)
         .then(resp => {
             resp.parsedData = new Parser(resp.body).getFormsData('#fPaREs');
-            this.emit('api-scenario', resp);
+
+            if (datas.isObject(resp.parsedData)) {
+                this.emit('api-scenario', resp);
+            } else {
+                const msg = `no-data (${this.currScenarioAlias})`;
+                this.emit('api-error', {msg, response: resp});
+            }
         })
         .catch(err => this.emit('api-error', err))
     ;
@@ -242,12 +344,18 @@ function onPortmoneCheckPin(pin) {
 
 function onPortmoneConfirm(response) {
     setScenariosFrom.call(this, arguments);
-    const action = urlPrepend(PM_HOST, response.parsedData.action);
+    const action = this.getPortmoneHost(response.parsedData.action);
 
     this.client.post(action, response.parsedData.values)
         .then(resp => {
             resp.parsedData = new Parser(resp.body).getFormsData('#apiForm');
-            this.emit('api-scenario', resp);
+
+            if (datas.isObject(resp.parsedData)) {
+                this.emit('api-scenario', resp);
+            } else {
+                const msg = `no-data (${this.currScenarioAlias})`;
+                this.emit('api-error', {msg, response: resp});
+            }
         })
         .catch(err => this.emit('api-error', err))
     ;
@@ -255,7 +363,7 @@ function onPortmoneConfirm(response) {
 
 function onPortmoneDone(response) {
     setScenariosFrom.call(this, arguments);
-    const action = urlPrepend(PM_HOST, response.parsedData.action);
+    const action = this.getPortmoneHost(response.parsedData.action);
 
     this.client.post(action, response.parsedData.values)
         .then(resp => {
