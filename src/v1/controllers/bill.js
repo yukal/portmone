@@ -10,13 +10,11 @@ const crypt = require('../middleware/crypt');
 const datas = require('../middleware/datas');
 const colors = require('../middleware/colors');
 const formatter = require('../middleware/formatter');
-const Brequest = require('../middleware/Brequest')();
+const Brequest = require('../middleware/Brequest');
 const PortmoneAPI = require('../middleware/PortmoneAPI');
 const CACHE_FILE_MASK = './data/cache/%s.data';
 
-const API = new PortmoneAPI(config, Brequest);
-API.on('api-error', onApiError);
-API.on('api-data', onApiData);
+let API;
 
 async function rtBill(req, res) {
     const { secret, authKey, MM, YY, cvv2, card_number } = req.body;
@@ -48,6 +46,10 @@ async function rtBill(req, res) {
     const amount = Number.parseInt(req.body.amount, 10) || 0;
     const phone = datas.parseMobilePhone(req.body.phone);
 
+    API = new PortmoneAPI(config, new Brequest());
+    API.on('api-error', onApiError);
+    API.on('api-data', onApiData);
+
     API.bill(currency, amount, phone, CCARD)
         .then(data => done(res, data))
         .catch(err => fail(res, err))
@@ -68,13 +70,14 @@ function rtCheckPin(req, res) {
 
             console.log('  %s\n    %s  (%s, %s)', statusMsg, name, lat, lng);
             done(res);
+
+            API = null;
         })
         .catch(response => {
-            const { name, lat, lng } = API.location;
-            const statusMsg = util.format('%s Payment failed!', colors.red('✖'));
-
-            console.log('  %s\n    %s  (%s, %s)', statusMsg, name, lat, lng);
+            console.log('  %s Payment failed!', colors.red('✖'));
             fail(res, 'unknown error');
+
+            API = null;
         })
     ;
 }
@@ -183,7 +186,34 @@ async function loadData(authKey) {
 }
 
 function onApiError(err) {
-    console.error(arguments.callee.name, err);
+    process.stdout.write(colors.red(arguments.callee.name) + colors.mono(6, ' => '));
+    const dumpfile = util.format(CACHE_FILE_MASK, API.currScenarioAlias) + '.dump';
+
+    if (datas.isObject(err)) {
+        if (err.hasOwnProperty('msg')) {
+            const { res, options, body, parsedData } = err.response;
+            const textBody = JSON.stringify({
+                headers: res.headers,
+                href: options.href,
+                parsedData,
+                body,
+            }, null, 4);
+
+            fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
+            console.error(err.msg);
+        } else {
+            const textBody = JSON.stringify(err, null, 4);
+            fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
+            console.error(err);
+        }
+        // err.hasOwnProperty('msg') ?console.error(err.msg) :console.error(err);
+    } else {
+        const textBody = JSON.stringify(err, null, 4);
+        fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
+        console.error(err);
+    }
+
+    API = null;
 }
 
 function onApiData(data, response) {
@@ -195,14 +225,27 @@ function onApiData(data, response) {
     }
 
     try {
+        const headerColors = {
+            href: 'gray',
+            method: 'white',
+            status: function paintStatusCode(val) {
+                if (val>199 && val<300) { return 'green'; }
+                else if (val>299 && val<400) { return 'brown'; }
+                else if (val>399) { return 'red'; }
+                return 'gray';
+            },
+            'content-type': '029',
+            // server: 'gray',
+        };
+
         const values = data.hasOwnProperty('values') ?data.values :data;
-        const textHeadersColored = formatter.headerData(response.res, response.options) 
-            + '\n' + formatter.tree(values, indentWidth, frameWidth, treeCallback) 
+        const textHeadersColored = formatter.headerData(API, headerColors) 
+            + '\n' + datas.tree(values, indentWidth, frameWidth, treeCallback) 
             + '\n\n'
         ;
 
-        const textHeaders = formatter.headerData(response.res, response.options) 
-            + '\n' + formatter.tree(values, indentWidth, frameWidth) 
+        const textHeaders = formatter.headerData(API) 
+            + '\n' + datas.tree(values, indentWidth, frameWidth) 
             + '\n\n'
         ;
 
