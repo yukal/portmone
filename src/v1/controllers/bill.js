@@ -10,7 +10,6 @@ const crypt = require('../middleware/crypt');
 const datas = require('../middleware/datas');
 const colors = require('../middleware/colors');
 const formatter = require('../middleware/formatter');
-const Brequest = require('../middleware/Brequest');
 const PortmoneAPI = require('../middleware/PortmoneAPI');
 const CACHE_FILE_MASK = './data/cache/%s.data';
 
@@ -46,7 +45,7 @@ async function rtBill(req, res) {
     const amount = Number.parseInt(req.body.amount, 10) || 0;
     const phone = datas.parseMobilePhone(req.body.phone);
 
-    API = new PortmoneAPI(config, new Brequest());
+    API = new PortmoneAPI(config);
     API.on('api-error', onApiError);
     API.on('api-data', onApiData);
 
@@ -187,16 +186,16 @@ async function loadData(authKey) {
 
 function onApiError(err) {
     process.stdout.write(colors.red(arguments.callee.name) + colors.mono(6, ' => '));
-    const dumpfile = util.format(CACHE_FILE_MASK, API.currScenarioAlias) + '.dump';
+    const dumpfile = util.format(CACHE_FILE_MASK, this.currScenarioAlias) + '.dump';
 
     if (datas.isObject(err)) {
         if (err.hasOwnProperty('msg')) {
-            const { res, options, body, parsedData } = err.response;
+            // const { res, options, body, parsedData } = err.response;
             const textBody = JSON.stringify({
-                headers: res.headers,
-                href: options.href,
-                parsedData,
-                body,
+                headers: this.client.res.headers,
+                href: this.client.requestOptions.href,
+                data: this.client.requestData,
+                // body: this.client.res.,
             }, null, 4);
 
             fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
@@ -239,17 +238,17 @@ function onApiData(data, response) {
         };
 
         const values = data.hasOwnProperty('values') ?data.values :data;
-        const textHeadersColored = formatter.headerData(API, headerColors) 
+        const textHeadersColored = formatter.headerData(this, headerColors)
             + '\n' + datas.tree(values, indentWidth, frameWidth, treeCallback) 
             + '\n\n'
         ;
 
-        const textHeaders = formatter.headerData(API) 
+        const textHeaders = formatter.headerData(this)
             + '\n' + datas.tree(values, indentWidth, frameWidth) 
             + '\n\n'
         ;
 
-        const dumpfile = util.format(CACHE_FILE_MASK, API.currScenarioAlias);
+        const dumpfile = util.format(CACHE_FILE_MASK, this.currScenarioAlias);
         const textBody = typeof(response.body) == 'string' 
             ? response.body 
             : JSON.stringify(response.body, null, 4)
@@ -263,7 +262,7 @@ function onApiData(data, response) {
         console.error(arguments.callee.name, err);
     }
 
-    if (API.currScenarioAlias == API.DONE) {
+    if (this.currScenarioAlias == this.DONE) {
         onApiData.dumpfile = false;
     }
 }
