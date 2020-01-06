@@ -1,9 +1,9 @@
 const EventEmitter = require('events');
-const util = require('util');
 
 const crypt = require('./crypt');
 const datas = require('./datas');
 const Parser = require('./HtmlParser');
+const Brequest = require('./Brequest');
 
 const PM_HOST = 'https://www.portmone.com.ua';
 const PB_HOST = 'https://acs.privatbank.ua';
@@ -25,13 +25,17 @@ class PortmoneAPI extends EventEmitter {
         super();
 
         this.config = config;
-        this.client = client;
+        this.client = client ?client :new Brequest();
 
         // Portmone payment data
         this.pmPayData = {};
 
         // Privatbank payment data
         this.pbPayData = {};
+
+        if (config.hasOwnProperty('cookies')) {
+            this.client.cookies.update(config.cookies);
+        }
 
         this.on('api-scenario', onScenario);
     }
