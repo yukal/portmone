@@ -2,96 +2,11 @@ const util = require('util');
 const fs = require('fs');
 const datas = require('./datas');
 const clr = require('./colors');
+const Cookie = require('./Cookie');
 
 const SEP_HEAD = ' | ';
 const SEP_CONT = '; ';
 const BLOCK_LIMIT = 104;
-
-function paint(key, val, colors) {
-    let color = colors.hasOwnProperty(key) ?colors[key] :'gray';
-
-    if (datas.isFunction(color)) {
-        color = color(val);
-    }
-
-    return clr.hasOwnProperty(color)
-        ? clr[color](val)
-        : clr(color, val)
-    ;
-}
-
-function formatHeaderItems(data, items, formats={}, colors) {
-    const formattedItems = [];
-    for (const name of items) {
-        let value = formats.hasOwnProperty(name)
-            ? formats[name](datas.getDataFrom(data, name))
-            : datas.getDataFrom(data, name)
-        ;
-
-        if (! datas.isEmpty(value)) {
-            colors
-                ? formattedItems.push(paint(name, value, colors))
-                : formattedItems.push(value)
-            ;
-        }
-    }
-    return formattedItems;
-}
-
-function formatHeaders(data, indentNum=2, colors) {
-    const indent = ' '.repeat(indentNum);
-    const headers = {};
-    let info = [];
-
-    const HEAD_SEPARATOR = colors ?paint('separator-head', SEP_HEAD, colors) :SEP_HEAD;
-    const CONT_SEPARATOR = colors ?paint('separator-cont', SEP_CONT, colors) :SEP_CONT;
-
-    if (! data) {
-        return info;
-    }
-
-    const hdrServer = [
-        'server', 'date', 'content-length',
-    ];
-
-    const hdrContent = [
-        'content-type', 'content-encoding', 'connection', 'expires',
-        'transfer-encoding', 'cache-control', 'pragma', 'set-cookie',
-        'strict-transport-security', 'x-content-type-options', 'vary',
-    ];
-
-    const formats = {
-        'content-length': val => val > 0 ?`${val} bytes` :null,
-        'content-type': val => getContentType(val, CONT_SEPARATOR),
-        'cache-control': val => getCacheType(data),
-        'connection': val => null,
-        'set-cookie': val => datas.isEmpty(val) ?null :'cookie',
-        'expires': val => null,
-        'pragma': val => null,
-        'vary': val => null,
-    };
-
-    const serverInfo = formatHeaderItems(data, hdrServer, formats, colors);
-    serverInfo.length>0 && info.push(util.format('%s%s\n', indent, serverInfo.join(HEAD_SEPARATOR)));
-
-    const contentInfo = formatHeaderItems(data, hdrContent, formats, colors);
-    contentInfo.length>0 && info.push(util.format('%s%s\n', indent, contentInfo.join(CONT_SEPARATOR)));
-
-    // Object.assign(headers, datas.getItemsExcept(data, [].concat(hdrServer, hdrContent)));
-    for (const key in headers) {
-        let val = Array.isArray(headers[ key ])
-            ? headers[ key ].join('\n' + indent + ' '.repeat(key.length + 2))
-            : headers[ key ]
-        ;
-
-        const title = util.format('%s: ', datas.textCapital(key));
-
-        colors && (val = paint(key, val, colors));
-        info.push(util.format('%s%s%s\n', indent, title, val));
-    }
-
-    return info;
-}
 
 function getCacheType(headers) {
     const pragma = headers.hasOwnProperty('pragma') ?headers.pragma.toLowerCase() :'';
@@ -135,25 +50,6 @@ function getContentType(val, separator=', ') {
     }
 
     return types.join(separator);
-}
-
-function getRequestInfo(response, indentNum=2, colors) {
-    const { res, options, body, postData } = response;
-    const headers = datas.cloneObject(res.headers);
-    const indent = ' '.repeat(indentNum);
-    let info = [];
-
-    const status = colors ?paint('statusCode', res.statusCode, colors) :res.statusCode;
-    const method = colors ?paint('method', res.req.method, colors) :res.req.method;
-    const path   = colors ?paint('path', options.href, colors) :options.href;
-    // const path   = colors ?paint('path', res.req.path, colors) :res.req.path;
-
-    info.push(util.format('%s %s %s\n', status, method, path));
-    info = info.concat(formatHeaders(headers, indentNum, colors));
-    info.push('\n');
-
-    // return info.join('') + '\n\n';
-    return info.join('');
 }
 
 function formatHeaders(headers, limit=86, indent=0, colors={}) {
@@ -240,9 +136,12 @@ function formatHeaders(headers, limit=86, indent=0, colors={}) {
 }
 
 function headerData(instanceAPI, colors) {
-    const { statusCode, headers } = instanceAPI.client.res;
-    const { href } = instanceAPI.client.requestOptions;
-    const { method } = instanceAPI.client.req;
+    const { req, res } = instanceAPI.client;
+    const options = instanceAPI.client.requestOptions;
+    // const data = instanceAPI.client.requestData;
+
+    // const requestHeaders = options.headers;
+    // const responseHeaders = res.headers;
 
     const indentWidth = 4;
     const frameWidth = process.stdout.columns - indentWidth * 2;
@@ -257,21 +156,61 @@ function headerData(instanceAPI, colors) {
         const hrefColor = colors.hasOwnProperty('href') ?colors.href :'default';       // Gray
 
         if (datas.isFunction(statusColor)) {
-            statusColor = statusColor(statusCode);
+            statusColor = statusColor(res.statusCode);
         }
         // console.log(colors);
 
-        statusContent = util.format('%s %s %s', clr(statusColor, statusCode), clr(methodColor, method), clr(hrefColor, href));
-        headersContent = formatHeaders(instanceAPI.client.res.headers, frameWidth, indentWidth, colors);
+        statusContent = util.format('%s %s %s', clr(statusColor, res.statusCode), clr(methodColor, req.method), clr(hrefColor, options.href));
+        headersContent = formatHeaders(res.headers, frameWidth, indentWidth, colors);
+        headersContent = appendCookies(headersContent, instanceAPI.client, frameWidth, indentWidth, colors);
 
     } else {
 
-        statusContent = util.format('%s %s %s', statusCode, method, href);
-        headersContent = formatHeaders(instanceAPI.client.res.headers, frameWidth, indentWidth);
+        statusContent = util.format('%s %s %s', res.statusCode, req.method, options.href);
+        headersContent = formatHeaders(res.headers, frameWidth, indentWidth);
+        headersContent = appendCookies(headersContent, instanceAPI.client, frameWidth, indentWidth);
 
     }
 
     return [statusContent, headersContent].join('\n');
+}
+
+function appendCookies(text='', client, frameWidth, indentWidth, colors) {
+    const options = client.requestOptions;
+    let content = text;
+
+    if (options.headers.hasOwnProperty('Cookie')) {
+        const cookies = colors ?clr.gray(options.headers.Cookie) :options.headers.Cookie;
+        const splitted = datas.splitText('cookie: '+cookies, frameWidth-indentWidth, indentWidth);
+        content = util.format('%s\n%s', splitted, content);
+    }
+
+    if (client.res.headers.hasOwnProperty('set-cookie')) {
+        const cookiesData = getCookiesFrom(client);
+
+        if (cookiesData.length) {
+            const cookies = colors ?clr.gray(cookiesData) :cookiesData;
+            const splitted = datas.splitText('set-cookie: '+cookies, frameWidth-indentWidth, indentWidth);
+            content = util.format('%s\n%s', content, splitted);
+        }
+    }
+
+    return content;
+}
+
+function getCookiesFrom(client) {
+    const parsedCookies = Cookie.parse(client.res.headers['set-cookie']);
+
+    if (datas.isObject(parsedCookies)) {
+        const items = Object.keys(parsedCookies).map(key => parsedCookies[key].value);
+        return items.join('; ');
+    }
+
+    return '';
+
+    // const hostname = client.getHostname();
+    // const cookies = client.cookies.getValues(hostname);
+    // return typeof(cookies)=='string' ?cookies :'';
 }
 
 const formatter = {
