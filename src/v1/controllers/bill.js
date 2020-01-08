@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const zlib = require('zlib');
 const util = require('util');
 const fs = require('fs');
 const readFile = util.promisify(fs.readFile);
@@ -11,7 +12,7 @@ const datas = require('../middleware/datas');
 const colors = require('../middleware/colors');
 const formatter = require('../middleware/formatter');
 const PortmoneAPI = require('../middleware/PortmoneAPI');
-const CACHE_FILE_MASK = './data/cache/%s.data';
+const CACHE_DIR = './data/cache';
 
 let API;
 
@@ -69,14 +70,10 @@ function rtCheckPin(req, res) {
 
             console.log('  %s\n    %s  (%s, %s)', statusMsg, name, lat, lng);
             done(res);
-
-            API = null;
         })
         .catch(response => {
             console.log('  %s Payment failed!', colors.red('✖'));
             fail(res, 'unknown error');
-
-            API = null;
         })
     ;
 }
@@ -96,7 +93,7 @@ async function rtEncode(req, res) {
     const pbKeyB64 = await crypt.rsa.encompress(publicKey, encOpts.publicKeyEncoding.type, 'base64');
 
     const jsonData = JSON.stringify({ secret, data, privateKey }, null, 4);
-    const destination = util.format(CACHE_FILE_MASK, crypt.md5(pbKeyB64));
+    const destination = util.format('%s/%s', CACHE_DIR, crypt.md5(pbKeyB64));
     fs.writeFile(destination, jsonData, err => err && console.error(err));
 
     done(res, { authKey: pbKeyB64 });
@@ -163,7 +160,7 @@ async function verifyAuth(data, key, config, decode='base64') {
 }
 
 async function loadData(authKey) {
-    const destination = util.format(CACHE_FILE_MASK, crypt.md5(authKey));
+    const destination = util.format('%s/%s', CACHE_DIR, crypt.md5(authKey));
     let data = false;
 
     if (!authKey) {
@@ -186,7 +183,7 @@ async function loadData(authKey) {
 
 function onApiError(err) {
     process.stdout.write(colors.red(arguments.callee.name) + colors.mono(6, ' => '));
-    const dumpfile = util.format(CACHE_FILE_MASK, this.currScenarioAlias) + '.dump';
+    const dumpfile = util.format('%s/%s.dump', CACHE_DIR, this.currScenarioAlias);
 
     if (datas.isObject(err)) {
         if (err.hasOwnProperty('msg')) {
@@ -211,8 +208,6 @@ function onApiError(err) {
         fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
         console.error(err);
     }
-
-    API = null;
 }
 
 function onApiData(data, response) {
@@ -220,7 +215,7 @@ function onApiData(data, response) {
     const frameWidth = process.stdout.columns - indentWidth * 2;
 
     if (!onApiData.dumpfile) {
-        onApiData.dumpfile = util.format(CACHE_FILE_MASK, Date.now());
+        onApiData.dumpfile = util.format('%s/%s', CACHE_DIR, Date.now());
     }
 
     try {
@@ -248,14 +243,18 @@ function onApiData(data, response) {
             + '\n\n'
         ;
 
-        const dumpfile = util.format(CACHE_FILE_MASK, this.currScenarioAlias);
+        const dumpfile = util.format('%s-%s.gz', onApiData.dumpfile, this.currScenarioAlias);
         const textBody = typeof(response.body) == 'string' 
             ? response.body 
             : JSON.stringify(response.body, null, 4)
         ;
 
-        fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
-        fs.appendFile(onApiData.dumpfile, textHeaders, 'utf8', err => err && console.error(err));
+        // fs.writeFile(dumpfile, textBody, 'utf8', err => err && console.error(err));
+        zlib.gzip(Buffer.from(textBody), (_, result) => {
+            fs.writeFile(`${dumpfile}.gz`, result, 'binary', e=>e&&console.error(e))
+        });
+
+        fs.appendFile(`${onApiData.dumpfile}.log`, textHeaders, 'utf8', err => err && console.error(err));
         process.stdout.write(textHeadersColored);
 
     } catch (err) {
