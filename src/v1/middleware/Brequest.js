@@ -35,6 +35,9 @@ class Brequest {
                 }
             },
         });
+
+        this.requestOptions = {};
+        this.requestData = {};
     }
 
     get(url, headers) {
