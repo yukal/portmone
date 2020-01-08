@@ -243,7 +243,7 @@ function onApiData(data, response) {
             + '\n\n'
         ;
 
-        const dumpfile = util.format('%s-%s.gz', onApiData.dumpfile, this.currScenarioAlias);
+        const dumpfile = util.format('%s-%s', onApiData.dumpfile, this.currScenarioAlias);
         const textBody = typeof(response.body) == 'string' 
             ? response.body 
             : JSON.stringify(response.body, null, 4)
