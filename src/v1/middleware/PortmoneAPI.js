@@ -2,7 +2,7 @@ const EventEmitter = require('events');
 
 const crypt = require('./crypt');
 const datas = require('./datas');
-const Parser = require('./HtmlParser');
+const HtmlParser = require('./HtmlParser');
 const Brequest = require('./Brequest');
 
 const PM_HOST = 'https://www.portmone.com.ua';
@@ -33,10 +33,22 @@ class PortmoneAPI extends EventEmitter {
         // Privatbank payment data
         this.pbPayData = {};
 
+        // Set cookies
         if (config.hasOwnProperty('cookies')) {
             this.client.cookies.update(config.cookies);
         }
 
+        // Set custom error listener
+        if (config.hasOwnProperty('onApiError')) {
+            this.on('api-error', config.onApiError);
+        }
+
+        // Set custom data listener
+        if (config.hasOwnProperty('onApiData')) {
+            this.on('api-data', config.onApiData);
+        }
+
+        // Start listening to the API worker
         this.on('api-scenario', onScenario);
     }
 
@@ -79,14 +91,11 @@ class PortmoneAPI extends EventEmitter {
         });
 
         return new Promise(function promise(resolve, reject) {
-            self.once('api-done', function onBillDone(response) {
-                const { jsessionid } = response.parsedData;
-
-                if (jsessionid) {
-                    resolve({ location: self.location });
-                } else {
-                    reject('no-jsession');
-                }
+            self.once('api-done', function onBillDone(parsedData) {
+                parsedData.jsessionid
+                    ? resolve({ location: self.location })
+                    : reject('no-jsession')
+                ;
             });
 
             onPortmoneForm.call(self);
@@ -97,12 +106,8 @@ class PortmoneAPI extends EventEmitter {
         const self = this;
 
         return new Promise(function promise(resolve, reject) {
-            self.once('api-done', function onCheckPinDone(response) {
-                const { success } = response.parsedData;
-                success ?resolve(response) :reject(response);
-
-                // Client Cookies
-                // console.log(self.client.cookies);
+            self.once('api-done', function onCheckPinDone(parsedData) {
+                parsedData.success ?resolve() :reject();
             });
 
             onPortmoneCheckPin.call(self, pin);
@@ -135,28 +140,34 @@ class PortmoneAPI extends EventEmitter {
 }
 
 
-function getSID(response, keyName) {
+/**
+ * getSID
+ * @param {string} sidName Name of session ID
+ */
+function getSID(sidName) {
     let sid;
 
+    // Get SID from responsed cookie
     if (this.client.res.headers.hasOwnProperty('set-cookie')) {
-        sid = datas.getSessionID(keyName, this.client.res.headers['set-cookie']);
+        sid = datas.getSessionID(sidName, this.client.res.headers['set-cookie']);
     }
 
+    // Trying to get SID from the body of a response
     if (datas.isEmpty(sid)) {
-        sid = datas.getSessionID(keyName, response.body);
+        sid = datas.getSessionID(sidName, this.client.body);
     }
 
+    // Trying to get SID from cached cookie
     if (datas.isEmpty(sid) && (this instanceof PortmoneAPI)) {
-        const host = this.client.requestOptions.host.replace(/^www\./i, '');
-        if (this.client.cookies.hasOwnProperty(host)) {
-            const cookies = this.client.cookies[ host ];
-            const key = Object.keys(cookies).filter(val => val.toLowerCase()==keyName).shift();
-            sid = datas.getSessionID(keyName, cookies[key].value);
+        const shortHostname = this.client.getShortHostname();
+        if (this.client.cookies.hasOwnProperty(shortHostname)) {
+            const cookies = this.client.cookies.getValues(shortHostname);
+            sid = datas.getSessionID(sidName, cookies);
         }
     }
 
     return sid;
-    // return sid ?this[keyName]=sid :this[keyName];
+    // return sid ?this[sidName]=sid :this[sidName];
 }
 
 function getScenarioAlias(data) {
@@ -197,20 +208,20 @@ function setScenariosFrom(args) {
     // process.stdout.write('next '); console.log(this.nextScenario);
 }
 
-function onScenario(response) {
-    // process.stdout.write(`${this.currScenario.name} ==> `);
-    // console.log(this.nextScenario);
+function onScenario(parsedData) {
+    process.stdout.write(`${this.currScenario.name} ==> `);
+    console.log(this.nextScenario);
 
-    if (response) {
-        const parsedData = datas.getDataFrom(response, 'parsedData');
-        this.emit('api-data', parsedData, response);
+    if (parsedData) {
+        this.emit('api-data', parsedData);
     }
 
     if (datas.isFunction(this.nextScenario)) {
-        this.nextScenario(response);
+        this.nextScenario(parsedData);
     }
+
     else if (this.nextScenario == 'done') {
-        this.emit('api-done', response);
+        this.emit('api-done', parsedData);
     }
 }
 
@@ -224,99 +235,85 @@ function onPortmoneForm() {
     });
 
     this.client.get(action)
-        .then(resp => {
-            resp.parsedData = new Parser(resp.body).getFormsData('#ptm-form');
+        .then(body => {
+            const form = new HtmlParser(body).getFormsData('#ptm-form');
 
-            if (datas.isObject(resp.parsedData)) {
-                Object.assign(this.pmPayData, resp.parsedData.values);
-                this.emit('api-scenario', resp);
+            if (datas.isObject(form)) {
+                Object.assign(this.pmPayData, form.values);
+                this.emit('api-scenario', form);
             } else {
-                const msg = `no-data (${this.currScenarioAlias})`;
-                this.emit('api-error', {msg, response: resp});
+                this.emit('api-error', 'no-data');
             }
         })
         .catch(err => this.emit('api-error', err))
     ;
 }
 
-function onPortmonePromo(response) {
+function onPortmonePromo(data) {
     setScenariosFrom.call(this, arguments);
     const action = this.getPortmoneHost('/r3/secure/check/kyivstar-promo');
     const values = Object.assign({ description: this.phone }, API_DATA.payee);
 
     this.client.postXHR(action, values)
-        .then(resp => {
-            resp.parsedData = { description: datas.getDataFrom(resp, 'body.response.description') };
-
-            if (!datas.isEmpty(resp.parsedData.description)) {
-                Object.assign(this.pmPayData, resp.parsedData);
+        .then(body => {
+            const description = datas.getDataFrom(body, 'response.description');
+            if (description) {
+                this.pmPayData.description = description;
             }
-
-            this.emit('api-scenario', resp);
+            this.emit('api-scenario', { description });
         })
         .catch(err => this.emit('api-error', err))
     ;
 }
 
-function onPortmonePay(response) {
+function onPortmonePay(data) {
     setScenariosFrom.call(this, arguments);
     const action = this.getPortmoneHost('/r3/secure/pay/do-payment');
 
     this.client.post(action, this.pmPayData)
-        .then(resp => {
-            const html = datas.getDataFrom(resp, 'body.response.form');
-            resp.parsedData = new Parser(html).getFormsData('#apiForm');
+        .then(body => {
+            const html = datas.getDataFrom(body, 'response.form');
+            const form = new HtmlParser(html).getFormsData('#apiForm');
 
-            if (datas.isObject(resp.parsedData)) {
-                this.emit('api-scenario', resp);
+            datas.isObject(form)
+                ? this.emit('api-scenario', form)
+                : this.emit('api-error', 'no-data')
+            ;
+        })
+        .catch(err => this.emit('api-error', err))
+    ;
+}
+
+function onPrivatbankForm(data) {
+    setScenariosFrom.call(this, arguments);
+    const action = this.getPrivatbankHost(data.action);
+
+    this.client.post(action, data.values)
+        .then(body => {
+            const form = new HtmlParser(body).getFormsData('#form_send');
+
+            if (datas.isObject(form)) {
+                this.pbPayData = Object.assign({}, form.values, this.pbPayData);
+                this.emit('api-scenario', form);
             } else {
-                const msg = `no-data (${this.currScenarioAlias})`;
-                this.emit('api-error', {msg, response: resp});
+                this.emit('api-error', 'no-data');
             }
         })
         .catch(err => this.emit('api-error', err))
     ;
 }
 
-function onPrivatbankForm(response) {
+function onPrivatbankPay(data) {
     setScenariosFrom.call(this, arguments);
-    const action = this.getPrivatbankHost(response.parsedData.action);
-
-    this.client.post(action, response.parsedData.values)
-        .then(resp => {
-            resp.parsedData = new Parser(resp.body).getFormsData('#form_send');
-
-            if (datas.isObject(resp.parsedData)) {
-                this.pbPayData = Object.assign({}, resp.parsedData.values, this.pbPayData);
-                this.emit('api-scenario', resp);
-            } else {
-                const msg = `no-data (${this.currScenarioAlias})`;
-                this.emit('api-error', {msg, response: resp});
-            }
-        })
-        .catch(err => this.emit('api-error', err))
-    ;
-}
-
-function onPrivatbankPay(response) {
-    setScenariosFrom.call(this, arguments);
-    const action = this.getPrivatbankHost(response.parsedData.action);
+    const action = this.getPrivatbankHost(data.action);
 
     this.client.post(action, this.pbPayData)
-        .then(resp => {
-            // const jsessionid = getSID.call(this, resp, 'jsessionid');
-            resp.parsedData = { jsessionid: getSID.call(this, resp, 'jsessionid') };
-
-            this.emit('api-scenario', resp);
-
-            // if (!datas.isEmpty(resp.parsedData.jsessionid)) {
-            //     this.emit('api-scenario', resp);
-            // } else {
-            //     // this.emit('api-done', resp);
-            //     // this.removeAllListeners('api-done');
-            //     const msg = `no-session (${this.currScenarioAlias})`;
-            //     this.emit('api-error', {msg, response: resp});
-            // }
+        .then(body => {
+            const jsessionid = getSID.call(this, 'jsessionid');
+            datas.isEmpty(jsessionid)
+                ? this.emit('api-error', 'no-data')
+                : this.emit('api-scenario', { jsessionid })
+            ;
         })
         .catch(err => this.emit('api-error', err))
     ;
@@ -332,49 +329,43 @@ function onPortmoneCheckPin(pin) {
     };
 
     this.client.post(action, values)
-        .then(resp => {
-            resp.parsedData = new Parser(resp.body).getFormsData('#fPaREs');
-
-            if (datas.isObject(resp.parsedData)) {
-                this.emit('api-scenario', resp);
-            } else {
-                const msg = `no-data (${this.currScenarioAlias})`;
-                this.emit('api-error', {msg, response: resp});
-            }
+        .then(body => {
+            const form = new HtmlParser(body).getFormsData('#fPaREs');
+            datas.isObject(form)
+                ? this.emit('api-scenario', form)
+                : this.emit('api-error', 'no-data')
+            ;
         })
         .catch(err => this.emit('api-error', err))
     ;
 }
 
-function onPortmoneConfirm(response) {
+function onPortmoneConfirm(data) {
     setScenariosFrom.call(this, arguments);
-    const action = this.getPortmoneHost(response.parsedData.action);
+    const action = this.getPortmoneHost(data.action);
 
-    this.client.post(action, response.parsedData.values)
-        .then(resp => {
-            resp.parsedData = new Parser(resp.body).getFormsData('#apiForm');
-
-            if (datas.isObject(resp.parsedData)) {
-                this.emit('api-scenario', resp);
-            } else {
-                const msg = `no-data (${this.currScenarioAlias})`;
-                this.emit('api-error', {msg, response: resp});
-            }
+    this.client.post(action, data.values)
+        .then(body => {
+            const form = new HtmlParser(body).getFormsData('#apiForm');
+            datas.isObject(form)
+                ? this.emit('api-scenario', form)
+                : this.emit('api-error', 'no-data')
+            ;
         })
         .catch(err => this.emit('api-error', err))
     ;
 }
 
-function onPortmoneDone(response) {
+function onPortmoneDone(data) {
     setScenariosFrom.call(this, arguments);
-    const action = this.getPortmoneHost(response.parsedData.action);
+    const action = this.getPortmoneHost(data.action);
 
-    this.client.post(action, response.parsedData.values)
-        .then(resp => {
-            resp.parsedData = {
-                success: /Оплата пройшла успішно/ig.test(resp.body),
+    this.client.post(action, data.values)
+        .then(body => {
+            const parsedData = {
+                success: /Оплата пройшла успішно/ig.test(body),
             };
-            this.emit('api-scenario', resp);
+            this.emit('api-scenario', parsedData);
         })
         .catch(err => this.emit('api-error', err))
     ;
@@ -383,13 +374,13 @@ function onPortmoneDone(response) {
 /**
  * Aliases of the API methods
  */
-PortmoneAPI.prototype.PM_FORM = 'portmone-form';
-PortmoneAPI.prototype.PM_PAY = 'portmone-pay';
-PortmoneAPI.prototype.PM_PIN = 'portmone-check-pin';
-PortmoneAPI.prototype.PB_FORM = 'privatbank-form';
-PortmoneAPI.prototype.PB_PAY = 'privatbank-pay';
-PortmoneAPI.prototype.PROMO = 'portmone-promo';
-PortmoneAPI.prototype.CONFIRM = 'portmone-confirm';
-PortmoneAPI.prototype.DONE = 'portmone-done';
+PortmoneAPI.PM_FORM = 'portmone-form';
+PortmoneAPI.PM_PAY = 'portmone-pay';
+PortmoneAPI.PM_PIN = 'portmone-check-pin';
+PortmoneAPI.PB_FORM = 'privatbank-form';
+PortmoneAPI.PB_PAY = 'privatbank-pay';
+PortmoneAPI.PROMO = 'portmone-promo';
+PortmoneAPI.CONFIRM = 'portmone-confirm';
+PortmoneAPI.DONE = 'portmone-done';
 
 module.exports = PortmoneAPI;
