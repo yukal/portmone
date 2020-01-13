@@ -89,7 +89,15 @@ function getMaskFrom(data, mask) {
     return chunks.join(' ');
 }
 
-// 1234 5678 9012 3456 == 16 length of digits
+/**
+ * getMaskCardN16
+ * Convert 16 digits length credit card number 
+ * to a specific representation: 
+ * "NNNNNNNNNNNNNNNN" => "NNNN NNNN NNNN NNNN"
+ * "1234567890123456" => "1234 5678 9012 3456"
+ * 
+ * @param {string} cn Credit Card Number
+ */
 function getMaskCardN16(cn) {
     let chunks = [];
 
@@ -245,7 +253,8 @@ function tree(obj, indent=0, limit=86, callbacks={}) {
 
         value = isObject(value)
             // ? util.format('{\n%s\n%s}', tree(value, indent+2, limit, callbacks), indentStr)
-            ? util.format('\n%s', tree(value, indent+2, limit, callbacks))
+            // ? util.format('\n%s', tree(value, indent+2, limit, callbacks))
+            ? '\n' + tree(value, indent+2, limit, callbacks)
             : splitText(value, limit-subIndent, 0, subIndent)
         ;
 
@@ -280,10 +289,64 @@ function tree(obj, indent=0, limit=86, callbacks={}) {
     return data.join('\n');
 }
 
+function digitsToBytes(str) {
+    const chunks = str.replace(/[^\d]/g,'').match(/\d{1,2}/g);
+    let chars = '';
+
+    for (let digit of chunks) {
+        if (digit < 10) {
+            digit = parseInt(digit, 10) + (digit.length * 100);
+        }
+        digit = String.fromCharCode(digit);
+        chars = `${chars}${digit}`;
+    }
+
+    return Buffer.from(chars, 'ascii');
+}
+
+function bytesToDigits(buff) {
+    let digits = '';
+
+    for (let byte of buff) {
+        if (byte >= 200) {
+            byte = `0${byte - 200}`;
+        }
+        else if (byte >= 100) {
+            byte -= 100;
+        }
+        digits = `${digits}${byte}`;
+    }
+
+    return digits;
+}
+
+function getCardDatas(digits) {
+    const mask = /(?<card_number>\d{16})(?<cvv2>\d{3})(?<MM>\d{2})(?<YY>\d{2})/;
+    const isBytes = /[^\d]/g.test(digits);
+    let data = {};
+
+    try {
+        data = isBytes 
+            ? Object.assign({}, bytesToDigits(digits).match(mask).groups)
+            : Object.assign({}, digits.match(mask).groups)
+        ;
+
+        // data = Object.assign({}, digits.match(mask).groups);
+        data.card_number_mask = getMaskCardN16(data.card_number);
+    } catch(err) {
+        console.error(err);
+    }
+
+    return data;
+}
+
 
 module.exports = {
     assignObjects,
+    bytesToDigits,
     cloneObject,
+    digitsToBytes,
+    getCardDatas,
     getDataFrom,
     getMaskFrom,
     getMaskCardN16,
