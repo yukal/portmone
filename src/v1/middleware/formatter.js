@@ -7,6 +7,70 @@ const Cookie = require('./Cookie');
 const SEP_HEAD = ' | ';
 const SEP_CONT = '; ';
 const BLOCK_LIMIT = 104;
+const DEFAULT_COLORS = {
+    'href': 'gray',
+    'method': 'white',
+    'content-type': '029',
+};
+
+class Formatter {
+    constructor(conf) {
+        this.indentWidth = 4;
+        this.frameWidth = process.stdout.columns - this.indentWidth * 2;
+        this.api = {};
+
+        if (datas.isObject(conf)) {
+            if (conf.hasOwnProperty('indentWidth')) {
+                this.indentWidth = conf.indentWidth;
+                this.frameWidth = process.stdout.columns - this.indentWidth * 2;
+            }
+
+            if (conf.hasOwnProperty('frameWidth')) {
+                this.frameWidth = conf.frameWidth;
+            }
+
+            if (conf.hasOwnProperty('api')) {
+                this.api = conf.api;
+            }
+        }
+        // this.headerColors;
+    }
+
+    dump(file, values, encode='utf8') {
+        const data = headerData(this.api)
+            + '\n' + datas.tree(values, this.indentWidth, this.frameWidth) 
+            + '\n\n'
+        ;
+
+        fs.appendFile(file, data, encode, err => err && console.error(err));
+    }
+
+    log(values, colors) {
+        if (!colors) {
+            colors = Object.assign({ status: paintStatusCode }, DEFAULT_COLORS);
+        }
+
+        function treeCallback(val, key) {
+            return clr('023', key.toUpperCase()) + clr.gray(`: ${val}`);
+            // return clr('244', key.toUpperCase()) + clr.gray(`: ${val}`);
+            // return clr('106', key.toUpperCase()) + clr.gray(`: ${val}`);
+        }
+
+        const headersDataColored = headerData(this.api, colors)
+            + '\n' + datas.tree(values, this.indentWidth, this.frameWidth, treeCallback) 
+            + '\n\n'
+        ;
+
+        process.stdout.write(headersDataColored);
+    }
+}
+
+function paintStatusCode(val) {
+    if (val>199 && val<300) { return 'green'; }
+    else if (val>299 && val<400) { return 'brown'; }
+    else if (val>399) { return 'red'; }
+    return 'gray';
+}
 
 function getCacheType(headers) {
     const pragma = headers.hasOwnProperty('pragma') ?headers.pragma.toLowerCase() :'';
@@ -213,8 +277,4 @@ function getCookiesFrom(client) {
     // return typeof(cookies)=='string' ?cookies :'';
 }
 
-const formatter = {
-    headerData,
-};
-
-module.exports = formatter;
+module.exports = Formatter;
