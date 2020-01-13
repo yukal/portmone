@@ -20,7 +20,7 @@
 // ENCDATA:   encrypted data as hex string (format mentioned on top)
 
 // load the build-in crypto functions
-const _crypto = require('crypto');
+const crypto = require('crypto');
 
 // encrypt/decrypt functions
 module.exports = {
@@ -29,23 +29,24 @@ module.exports = {
      * Encrypts text by given key
      * @param String text to encrypt
      * @param Buffer masterkey
-     * @returns String encrypted text, hex encoded
+     * @param String (optional) encoding format [hex, ascii, binary]
+     * @returns String|Buffer encrypted text, hex encoded
      */
-    encrypt: function (text, masterkey) {
+    encrypt: function (text, masterkey, encoding='hex') {
         // random initialization vector
-        const iv = _crypto.randomBytes(16);
+        const iv = crypto.randomBytes(16);
 
         // random salt
-        const salt = _crypto.randomBytes(64);
+        const salt = crypto.randomBytes(64);
 
         // derive encryption key: 32 byte key length
         // in assumption the masterkey is a cryptographic and NOT a password there is no need for
         // a large number of iterations. It may can replaced by HKDF
         // the value of 2145 is randomly chosen!
-        const key = _crypto.pbkdf2Sync(masterkey, salt, 2145, 32, 'sha512');
+        const key = crypto.pbkdf2Sync(masterkey, salt, 2145, 32, 'sha512');
 
         // AES 256 GCM Mode
-        const cipher = _crypto.createCipheriv('aes-256-gcm', key, iv);
+        const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
         // encrypt the given text
         const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
@@ -54,7 +55,10 @@ module.exports = {
         const tag = cipher.getAuthTag();
 
         // generate output
-        return Buffer.concat([salt, iv, tag, encrypted]).toString('hex');
+        return encoding 
+            ? Buffer.concat([salt, iv, tag, encrypted]).toString(encoding)
+            : Buffer.concat([salt, iv, tag, encrypted])
+        ;
     },
 
     /**
@@ -63,23 +67,24 @@ module.exports = {
      * @param Buffer masterkey
      * @returns String decrypted (original) text
      */
-    decrypt: function (encdata, masterkey) {
+    decrypt: function (encodedData, masterkey, decoding='hex') {
         let decrypted = false;
         try {
-            // hex decoding
-            const bData = Buffer.from(encdata, 'hex');
+            // decoding
+            const buffer = (encodedData instanceof Buffer) 
+                ?encodedData :Buffer.from(encodedData, decoding);
 
             // convert data to buffers
-            const salt = bData.slice(0, 64);
-            const iv = bData.slice(64, 80);
-            const tag = bData.slice(80, 96);
-            const text = bData.slice(96);
+            const salt = buffer.slice(0, 64);
+            const iv = buffer.slice(64, 80);
+            const tag = buffer.slice(80, 96);
+            const text = buffer.slice(96);
 
             // derive key using; 32 byte key length
-            const key = _crypto.pbkdf2Sync(masterkey, salt , 2145, 32, 'sha512');
+            const key = crypto.pbkdf2Sync(masterkey, salt , 2145, 32, 'sha512');
 
             // AES 256 GCM Mode
-            const decipher = _crypto.createDecipheriv('aes-256-gcm', key, iv);
+            const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
             decipher.setAuthTag(tag);
 
             // encrypt the given text
