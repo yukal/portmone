@@ -2,6 +2,7 @@ const URL = require('url');
 const https = require('https');
 const http = require('http');
 const zlib = require('zlib');
+const util = require('util');
 const iconv = require('iconv-lite');
 const Cookie = require('./Cookie');
 // iconv.extendNodeEncodings();
@@ -10,12 +11,6 @@ const { isObject, cloneObject } = require('./datas');
 const NOD_USER_AGENT = "Brequest v1.0";
 const LIN_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.103 Safari/537.36";
 const WIN_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36";
-
-const decoders = {
-    gzip: 'gunzip',
-    deflate: 'inflate',
-    br: 'brotliDecompress',
-};
 
 class Brequest {
     constructor() {
@@ -38,24 +33,25 @@ class Brequest {
 
         this.requestOptions = {};
         this.requestData = {};
+        this.body = '';
     }
 
     get(url, headers) {
         const options = getOptions('GET', url, headers);
         return request.call(this, options);
     }
-    
+
     post(url, data, headers) {
         const options = getOptions('POST', url, headers);
         return request.call(this, options, data);
     }
-    
+
     postXHR(url, data, headers={}) {
         headers['X-Requested-With'] = 'XMLHttpRequest';
         const options = getOptions('POST', url, headers);
         return request.call(this, options, data);
     }
-    
+
     postJSON(url, data, headers={}) {
         headers['Content-Type'] = 'application/json; charset=utf-8';
         const options = getOptions('POST', url, headers);
@@ -69,7 +65,7 @@ class Brequest {
         return undefined;
     }
 
-    getHostname(hostname) {
+    getShortHostname(hostname) {
         const host = hostname ?hostname :this.requestOptions.host;
         return host.replace(/^www\./i, '');
     }
@@ -89,11 +85,11 @@ class Brequest {
 function request(options, data) {
     const self = this;
     const RequestModule = options.protocol === 'https:'? https: http;
-    const host = this.getHostname(options.host);
+    const shortHostname = this.getShortHostname(options.host);
     let postData = null;
 
-    if (this.cookies.hasOwnProperty(host)) {
-        options.headers.Cookie = this.cookies.getValues(host);
+    if (this.cookies.hasOwnProperty(shortHostname)) {
+        options.headers.Cookie = this.cookies.getValues(shortHostname);
     }
 
     if (data) {
@@ -109,63 +105,50 @@ function request(options, data) {
         }
     }
 
-    options.headers['Accept-Encoding'] = Object.keys(decoders).join(', ');
+    options.headers['Accept-Encoding'] = Brequest.compressors.toString();
     this.requestOptions = options;
     this.requestData = data;
+    this.body = '';
 
     return new Promise((resolve, reject) => {
-        const chunks = [];
+        let packages = [];
 
         self.req = RequestModule.request(options, res => {
             self.res = res;
 
-            res.on('data', chunk => chunks.push(chunk));
-            res.on('end', () => {
-                const buffer = Buffer.concat(chunks);
-
-                const contentEncoding = res.headers.hasOwnProperty('content-encoding')
-                    ? res.headers['content-encoding'].toLowerCase() : '';
-
-                const decompress = decoders.hasOwnProperty(contentEncoding) 
-                    ? zlib[decoders[ contentEncoding ]] :false;
-
-                decompress 
-                    ? decompress(buffer, (err, decoded) => 
-                      request.finish.call(self, err, decoded, resolve, reject)) 
-                    : request.finish.call(self, null, buffer, resolve, reject)
-                ;
-            });
+            res.on('data', chunk => packages.push(chunk));
+            res.on('end', () => finish.call(self, null, packages, resolve, reject));
         });
 
         postData && self.req.write(postData);
 
-        self.req.on('error', err => request.finish.call(self, err, null, resolve, reject));
+        self.req.on('error', err => finish.call(self, err, packages, resolve, reject));
         self.req.end(); // !IMPORTANT
     });
 }
 
-request.finish = function(err, bodyBuff, resolve, reject) {
-    if (err) {
-        console.error(err);
-        return reject(err);
+async function finish(err, packages, resolve, reject) {
+    const { res, cookies } = this;
+    const { headers } = this.res;
+
+    if (this.res) {
+        if (packages.length) {
+            this.body = await decodeBody.call(this, Buffer.concat(packages));
+        }
+
+        if (headers.hasOwnProperty('set-cookie')) {
+            cookies.update(headers['set-cookie'], this.getShortHostname());
+            // console.log(cookies.getItems(host));
+        }
     }
 
-    if (this.res.headers.hasOwnProperty('set-cookie')) {
-        this.cookies.update(this.res.headers['set-cookie'], this.getHostname());
-        // console.log(this.cookies.getItems(host));
+    // if (res.statusMessage != 'OK')
+    if (res.statusCode > 399) {
+        const errorMessage = `request-error [${res.statusCode}] ${res.statusMessage}`;
+        return reject(errorMessage);
     }
 
-    // if (this.res.statusMessage != 'OK')
-    if (this.res.statusCode > 399) {
-        console.error(this.res.statusCode, this.res.statusMessage);
-        this.requestData && console.log(this.requestData);
-        return reject(null);
-    }
-
-    const contentType = this.res.headers['content-type'] || '';
-    const body = decodeBody(bodyBuff, contentType);
-
-    return resolve({ body });
+    return err ?reject(err) :resolve(this.body);
 }
 
 function getOptions(method, url, headersData) {
@@ -178,35 +161,113 @@ function getOptions(method, url, headersData) {
     return Object.assign({ method, headers }, URL.parse(url));
 }
 
-function decodeBody(buff, contentType) {
-    const chunks = contentType.split(';');
-    const ctype = chunks.shift().trim().toLowerCase();
-    const settings = {};
-    let body = buff;
+/**
+ * getContentInfo
+ * @param {Object} headers An object of the http.IncomingMessage
+ * @param {Object} buff A buffer of Html body
+ */
+function getContentInfo(headers, buff) {
+    const data = {
+        type: '',
+        charset: '',
+        encoding: '',
+    };
 
-    chunks.map(item => {
-        let [ key, value ] = item.split('=');
-        settings[ key.trim().toLowerCase() ] = value.trim();
-    });
+    if (headers.hasOwnProperty('content-type')) {
+        const chunks = headers['content-type'].split(';');
 
-    if (settings.hasOwnProperty('charset')) {
-        if (['utf8','utf-8'].indexOf(settings.charset) == -1) {
-            body = iconv.encode(iconv.decode(buff, settings.charset), 'utf8');
+        // Content-Type
+        data.type = chunks.shift().trim().toLowerCase();
+
+        // Other settings (e.g. charset=utf-8)
+        chunks.map(item => {
+            let [ key, val ] = item.split('=');
+            data[ key.trim().toLowerCase() ] = val.trim().toLowerCase();
+        });
+    }
+
+    // if (!data.hasOwnProperty('charset')) {
+    //     
+    // }
+
+    if (headers.hasOwnProperty('content-encoding')) {
+        data.encoding = headers['content-encoding'].toLowerCase();
+    } else {
+        if (Brequest.compressors.isGzip(buff)) {
+            data.encoding = 'gzip';
+        }
+        if (Brequest.compressors.isDeflate(buff)) {
+            data.encoding = 'deflate';
+        }
+        if (Brequest.compressors.isBrotli(buff)) {
+            data.encoding = 'br';
         }
     }
 
-    switch(ctype) {
-        case 'application/json':
-            try {
-                return JSON.parse(body);
+    return data;
+}
+
+/**
+ * decodeBody
+ * @param {Buffer} buff A buffer of Html body
+ */
+async function decodeBody(buff) {
+    let body = buff;
+
+    try {
+        const contentInfo = getContentInfo(this.res.headers, buff);
+
+        // Decompress
+        if (Brequest.compressors.hasOwnProperty(contentInfo.encoding)) {
+            const decompressorName = Brequest.compressors[ contentInfo.encoding ];
+
+            if (!Brequest.compressors.hasOwnProperty(decompressorName)) {
+                Object.defineProperty(Brequest.compressors, decompressorName, {
+                    value: util.promisify(zlib[ decompressorName ]),
+                });
             }
-            catch(error) {
-                console.error(error);
+
+            const decompress = Brequest.compressors[ decompressorName ];
+            body = await decompress(buff);
+        }
+
+        // Encoding content by charset
+        if (contentInfo.hasOwnProperty('charset')) {
+            if (['','utf8','utf-8'].indexOf(contentInfo.charset) == -1) {
+                body = iconv.encode(iconv.decode(buff, contentInfo.charset), 'utf8');
             }
-            break;
+        }
+
+        if ('application/json' == contentInfo.type) {
+            return JSON.parse(body.toString());
+        }
+
+    } catch(error) {
+        console.error(error);
     }
 
     return body.toString();
 }
+
+Brequest.compressors = Object.defineProperties({
+    br: 'brotliDecompress',
+    deflate: 'inflate',
+    gzip: 'gunzip',
+}, {
+    isBrotli: {
+        value: buffer => Buffer.from([ 0xCE, 0xB2, 0xCF, 0x81 ])
+            .equals(buffer.slice(0, 4))
+    },
+    isDeflate: {
+        value: buffer => 0x08 === buffer[0]
+    },
+    isGzip: {
+        value: buffer => Buffer.from([ 0x1F, 0x8B ])
+            .equals(buffer.slice(0, 2))
+    },
+    toString: { value: function toString() {
+        return Object.keys(this).join(',');
+    }},
+});
 
 module.exports = Brequest;
