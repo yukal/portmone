@@ -1,3 +1,13 @@
+/**
+ * Datas
+ * 
+ * @file
+ * @ingroup Libraries
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
+ */
+
 function isJSON(str) {
     if (typeof(str) == 'string') {
         return str[0] + str[str.length - 1] === '{}';

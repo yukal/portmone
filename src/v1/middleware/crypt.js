@@ -1,3 +1,13 @@
+/**
+ * Crypt
+ * 
+ * @file
+ * @ingroup Helpers
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
+ */
+
 const crypto = require('crypto');
 const aes = require('./AesUtil');
 const rsa = require('./RsaUtil');
@@ -83,12 +93,6 @@ function genPassword(length=32, mode=CHR_WORD|CHR_DIGIT|CHR_SPEC) {
 
     return Buffer.from(arr).toString('ascii');
 }
-
-module.exports.aes = aes;
-module.exports.rsa = rsa;
-module.exports.md5 = md5;
-module.exports.crc32 = crc32;
-module.exports.genPassword = genPassword;
 
 module.exports = {
     CHR_UPCASE,

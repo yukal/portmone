@@ -1,3 +1,13 @@
+/**
+ * HtmlParser
+ * 
+ * @file
+ * @ingroup Libraries
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
+ */
+
 class HtmlParser {
     constructor(html) {
         this.html = html;

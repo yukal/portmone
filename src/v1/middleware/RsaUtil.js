@@ -1,3 +1,13 @@
+/**
+ * RSA Util
+ * 
+ * @file
+ * @ingroup Helpers
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
+ */
+
 const crypto = require('crypto');
 const util = require('util');
 const zlib = require('zlib');
