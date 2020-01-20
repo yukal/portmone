@@ -1,9 +1,3 @@
-function terminate(res, error, stat=200) {
-    const msg = typeof(error)=='string' ?{ msg: error } :error;
-    console.error(error);
-    res.status(stat).json(msg);
-}
-
 function fail(res, error, stat=200) {
     const response = typeof(error)=='string' ?{ msg: error } :error||{};
     response.success = false;
@@ -17,7 +11,6 @@ function done(res, data={}, stat=200) {
 }
 
 module.exports = {
-    terminate,
     fail,
     done,
 };
