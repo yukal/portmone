@@ -1,10 +1,22 @@
-const URL = require('url');
-const https = require('https');
-const http = require('http');
-const zlib = require('zlib');
-const util = require('util');
+/**
+ * Brequest
+ * 
+ * @file
+ * @ingroup Libraries
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
+ */
+
+const Url = require('url');
+const Https = require('https');
+const Http = require('http');
+const Querystring = require('querystring');
+// const zlib = require('zlib');
+// const util = require('util');
 const iconv = require('iconv-lite');
 const Cookie = require('./Cookie');
+const asyncCompression = require('./asyncCompression');
 // iconv.extendNodeEncodings();
 const { isObject, cloneObject } = require('./datas');
 
@@ -71,20 +83,21 @@ class Brequest {
     }
 
     encodeURI(obj) {
-        let uriChunks = [];
-        for (const key in obj) {
-            const data = obj[key] !== null && typeof obj[key] == 'object'
-                ? JSON.stringify(obj[key]) : obj[key];
-            const uriChunk = key + '=' + encodeURIComponent(data);
-            uriChunks.push(uriChunk);
-        }
-        return uriChunks.join('&');
+        return Querystring.stringify(obj);
+        // let uriChunks = [];
+        // for (const key in obj) {
+        //     const data = obj[key] !== null && typeof obj[key] == 'object'
+        //         ? JSON.stringify(obj[key]) : obj[key];
+        //     const uriChunk = key + '=' + encodeURIComponent(data);
+        //     uriChunks.push(uriChunk);
+        // }
+        // return uriChunks.join('&');
     }
 }
 
 function request(options, data) {
     const self = this;
-    const RequestModule = options.protocol === 'https:'? https: http;
+    const RequestModule = options.protocol === 'https:'? Https: Http;
     const shortHostname = this.getShortHostname(options.host);
     let postData = null;
 
@@ -105,7 +118,7 @@ function request(options, data) {
         }
     }
 
-    options.headers['Accept-Encoding'] = Brequest.compressors.toString();
+    options.headers['Accept-Encoding'] = Brequest.compression.toString();
     this.requestOptions = options;
     this.requestData = data;
     this.body = '';
@@ -128,10 +141,10 @@ function request(options, data) {
 }
 
 async function finish(err, packages, resolve, reject) {
-    const { res, cookies } = this;
-    const { headers } = this.res;
-
     if (this.res) {
+        const { headers, statusCode, statusMessage } = this.res;
+        const { cookies } = this;
+
         if (packages.length) {
             this.body = await decodeBody.call(this, Buffer.concat(packages));
         }
@@ -140,12 +153,12 @@ async function finish(err, packages, resolve, reject) {
             cookies.update(headers['set-cookie'], this.getShortHostname());
             // console.log(cookies.getItems(host));
         }
-    }
 
-    // if (res.statusMessage != 'OK')
-    if (res.statusCode > 399) {
-        const errorMessage = `request-error [${res.statusCode}] ${res.statusMessage}`;
-        return reject(errorMessage);
+        // if (res.statusMessage != 'OK')
+        if (statusCode > 399) {
+            const errorMessage = `request-error [${statusCode}] ${statusMessage}`;
+            return reject(errorMessage);
+        }
     }
 
     return err ?reject(err) :resolve(this.body);
@@ -158,7 +171,7 @@ function getOptions(method, url, headersData) {
         headers['User-Agent'] = WIN_USER_AGENT;
     }
 
-    return Object.assign({ method, headers }, URL.parse(url));
+    return Object.assign({ method, headers }, Url.parse(url));
 }
 
 /**
@@ -182,7 +195,7 @@ function getContentInfo(headers, buff) {
         // Other settings (e.g. charset=utf-8)
         chunks.map(item => {
             let [ key, val ] = item.split('=');
-            data[ key.trim().toLowerCase() ] = val.trim().toLowerCase();
+            data[ key.trim().toLowerCase() ] = val.trim().toLowerCase().replace(/^['"]|["']$/g,'');
         });
     }
 
@@ -193,13 +206,13 @@ function getContentInfo(headers, buff) {
     if (headers.hasOwnProperty('content-encoding')) {
         data.encoding = headers['content-encoding'].toLowerCase();
     } else {
-        if (Brequest.compressors.isGzip(buff)) {
+        if (Brequest.compression.isGzip(buff)) {
             data.encoding = 'gzip';
         }
-        if (Brequest.compressors.isDeflate(buff)) {
+        if (Brequest.compression.isDeflate(buff)) {
             data.encoding = 'deflate';
         }
-        if (Brequest.compressors.isBrotli(buff)) {
+        if (Brequest.compression.isBrotli(buff)) {
             data.encoding = 'br';
         }
     }
@@ -218,16 +231,8 @@ async function decodeBody(buff) {
         const contentInfo = getContentInfo(this.res.headers, buff);
 
         // Decompress
-        if (Brequest.compressors.hasOwnProperty(contentInfo.encoding)) {
-            const decompressorName = Brequest.compressors[ contentInfo.encoding ];
-
-            if (!Brequest.compressors.hasOwnProperty(decompressorName)) {
-                Object.defineProperty(Brequest.compressors, decompressorName, {
-                    value: util.promisify(zlib[ decompressorName ]),
-                });
-            }
-
-            const decompress = Brequest.compressors[ decompressorName ];
+        if (Brequest.compression.decoders.hasOwnProperty(contentInfo.encoding)) {
+            const decompress = Brequest.compression.decoders[ contentInfo.encoding ];
             body = await decompress(buff);
         }
 
@@ -249,25 +254,5 @@ async function decodeBody(buff) {
     return body.toString();
 }
 
-Brequest.compressors = Object.defineProperties({
-    br: 'brotliDecompress',
-    deflate: 'inflate',
-    gzip: 'gunzip',
-}, {
-    isBrotli: {
-        value: buffer => Buffer.from([ 0xCE, 0xB2, 0xCF, 0x81 ])
-            .equals(buffer.slice(0, 4))
-    },
-    isDeflate: {
-        value: buffer => 0x08 === buffer[0]
-    },
-    isGzip: {
-        value: buffer => Buffer.from([ 0x1F, 0x8B ])
-            .equals(buffer.slice(0, 2))
-    },
-    toString: { value: function toString() {
-        return Object.keys(this).join(',');
-    }},
-});
-
+Brequest.compression = asyncCompression;
 module.exports = Brequest;
