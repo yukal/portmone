@@ -1,3 +1,13 @@
+/**
+ * Portmone API
+ * 
+ * @file
+ * @ingroup Libraries
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
+ */
+
 const EventEmitter = require('events');
 
 const crypt = require('./crypt');
@@ -33,6 +43,10 @@ class PortmoneAPI extends EventEmitter {
         // Privatbank payment data
         this.pbPayData = {};
 
+        // Whether payment finished successfuly (undefined, true, false)
+        // undefined => pending | true => success | false => failed
+        this.success = undefined;
+
         // Set cookies
         if (config.hasOwnProperty('cookies')) {
             this.client.cookies.update(config.cookies);
@@ -65,6 +79,8 @@ class PortmoneAPI extends EventEmitter {
     bill(currency, amount, phone, CCARD) {
         this.location = this.config.choords[ datas.randomInt(0, this.config.choords.length-1) ];
         this.phone = phone;
+
+        //console.log('Location: ', this.location);
 
         const fingerprint = crypt.md5(Date.now());
         const self = this;
@@ -209,8 +225,8 @@ function setScenariosFrom(args) {
 }
 
 function onScenario(parsedData) {
-    process.stdout.write(`${this.currScenario.name} ==> `);
-    console.log(this.nextScenario);
+    // process.stdout.write(`${this.currScenario.name} ==> `);
+    // console.log(this.nextScenario);
 
     if (parsedData) {
         this.emit('api-data', parsedData);
@@ -362,10 +378,8 @@ function onPortmoneDone(data) {
 
     this.client.post(action, data.values)
         .then(body => {
-            const parsedData = {
-                success: /Оплата пройшла успішно/ig.test(body),
-            };
-            this.emit('api-scenario', parsedData);
+            this.success = /Оплата пройшла успішно/ig.test(body);
+            this.emit('api-scenario', {success: this.success});
         })
         .catch(err => this.emit('api-error', err))
     ;
