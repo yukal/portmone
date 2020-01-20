@@ -1,8 +1,8 @@
 /**
- * Colors Module
- * Appends meta-codes to a textual data
- * Author: Alexander Yukal <yukal.alexander@gmail.com>
- * 
+ * Colors
+ * Appends ANSI meta-codes to a textual data
+ * https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
+ *
  * The 16 colors names:
  *   0. black     8. gray
  *   1. red       9. tomato
@@ -12,28 +12,36 @@
  *   5. magenta   13. pink
  *   6. teal      14. cyan
  *   7. default   15. white
- * 
+ *
  * usage:
  *   const clr = require('colors');
+ *   process.stdout.write(clr([0..15], '16 colors'));
+ *   process.stdout.write(clr.mono([0..26], '26 grey colors'));
  *   process.stdout.write(clr.red('Red Color'));
  *   process.stdout.write(clr.green('Green Color'));
- *   process.stdout.write(clr.c256(127, '127\'s color of 256'));
- * 
+ *   process.stdout.write(clr.blue('Blue Color'));
+ *   process.stdout.write(clr(127, '127\'s color of 256'));
+ *
+ * @file
+ * @ingroup Helpers
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
  */
 
 // 26 grayscale colors
 const MAP_MONO = [
-      0,      232, 233, 234, 235, 236, 237, 238, 239, 
-    240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 
-    250, 251, 252, 253, 254, 255,  15
+    0x00, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF,
+    0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8,
+    0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF, 0x0F
 ];
 
 /**
  * setcolor
  * Appends meta-codes to a textual data
- * 
- * @param {string} text Text data
+ *
  * @param {integer} color Color number. 7 as default
+ * @param {string} text Text data
  */
 function setcolor() {
     const args = [ ...arguments ];
@@ -55,7 +63,7 @@ function setcolor() {
 }
 
 setcolor.mono = (color, text) => {
-    const clr = MAP_MONO.length > color ?MAP_MONO[ color ] :246;
+    const clr = MAP_MONO.length > color ?MAP_MONO[ color ] :0xF6;
     return setcolor(clr, text);
 };
 
