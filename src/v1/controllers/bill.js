@@ -1,27 +1,51 @@
+/**
+ * Bill
+ * This controller implements:
+ * - payment of mobile telephone (Kyivstar only) using a credit card
+ * - encoding/decoding of credit card data for secure data transfer
+ * - implementing of Express routes:
+ *   - post /v1/bill
+ *   - post /v1/pin
+ *   - post /v1/encode
+ *   - post /v1/decode
+ *
+ * @file
+ * @ingroup Express.Controllers
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
+ */
+
 const crypto = require('crypto');
 const zlib = require('zlib');
 const util = require('util');
 const fs = require('fs');
 
-const readFile = util.promisify(fs.readFile);
-const fileExists = util.promisify(fs.exists);
-const gunzip = util.promisify(zlib.gunzip);
-const gzip = util.promisify(zlib.gzip);
-const randomBytes = util.promisify(crypto.randomBytes);
+// const fileAccessAsync = fs.promises.access;
+const readFileAsync = fs.promises.readFile;
+const randomBytesAsync = util.promisify(crypto.randomBytes);
 
 const { fail, done } = require('../middleware/process');
+const compressionAsync = require('../middleware/asyncCompression');
 const config = require('../../config.json');
 const crypt = require('../middleware/crypt');
 const datas = require('../middleware/datas');
 const colors = require('../middleware/colors');
-const Formatter = require('../middleware/formatter');
+const Reporter = require('../middleware/Reporter');
 const PortmoneAPI = require('../middleware/PortmoneAPI');
 const CACHE_DIR = './data/cache';
 
 let API;
-config.onApiData = onApiData;
-config.onApiError = onApiError;
 
+/**
+ * rtBill
+ * Replenishment of a mobile account
+ * @see https://expressjs.com/ru/4x/api.html#req
+ * @see https://expressjs.com/ru/4x/api.html#res
+ * @param {Object} req An object that represents the HTTP request
+ * @param {Object} res An object that represents the HTTP response
+ * @returns void
+ */
 async function rtBill(req, res) {
     if (! validateBillBody(req.body)) {
         return fail(res, 'Wrong parameters');
@@ -31,8 +55,13 @@ async function rtBill(req, res) {
     const amount = Number.parseInt(req.body.amount, 10) || 0;
     const phone = datas.parseMobilePhone(req.body.phone);
     const CCARD = await loadCreditCardData(req.body);
+    const apiParams = Object.assign({}, config, {onApiData, onApiError});
 
-    API = new PortmoneAPI(config);
+    if (!CCARD) {
+        return fail(res, 'Cant load credit card data');
+    }
+
+    API = new PortmoneAPI(apiParams);
 
     API.bill(currency, amount, phone, CCARD)
         .then(data => done(res, data))
@@ -40,6 +69,15 @@ async function rtBill(req, res) {
     ;
 }
 
+/**
+ * rtCheckPin
+ * Confirmation of the payment by pin code
+ * @see https://expressjs.com/ru/4x/api.html#req
+ * @see https://expressjs.com/ru/4x/api.html#res
+ * @param {Object} req An object that represents the HTTP request
+ * @param {Object} res An object that represents the HTTP response
+ * @returns void
+ */
 function rtCheckPin(req, res) {
     const { pin } = req.body;
 
@@ -48,24 +86,31 @@ function rtCheckPin(req, res) {
     }
 
     if (!API) {
-        API = new PortmoneAPI(config);
+        const apiParams = Object.assign({}, config, {onApiData, onApiError});
+        API = new PortmoneAPI(apiParams);
     }
 
     API.checkPin(pin)
         .then(() => {
-            const { name, lat, lng } = API.location;
-            const statusMsg = util.format('%s Payment successful!', colors.green('✔'));
-
-            console.log('  %s\n    %s  (%s, %s)', statusMsg, name, lat, lng);
+            process.stdout.write(getStatusMessage(API));
             done(res);
         })
         .catch(() => {
-            console.log('  %s Payment failed!', colors.red('✖'));
+            process.stdout.write(getStatusMessage(API));
             fail(res, 'unknown error');
         })
     ;
 }
 
+/**
+ * rtEncode
+ * Encodes credit card data
+ * @see https://expressjs.com/ru/4x/api.html#req
+ * @see https://expressjs.com/ru/4x/api.html#res
+ * @param {Object} req An object that represents the HTTP request
+ * @param {Object} res An object that represents the HTTP response
+ * @returns void
+ */
 async function rtEncode(req, res) {
     const { MM, YY, cvv2, card_number } = req.body;
     const creditCardDigits = util.format('%s%s%s%s', card_number, cvv2, MM, YY);
@@ -81,7 +126,7 @@ async function rtEncode(req, res) {
 
     try {
 
-        const noise = await randomBytes(noiseLen);
+        const noise = await randomBytesAsync(noiseLen);
         const bufNoised = Buffer.concat([
             offsetBuff,
             noise.slice(0, offset),
@@ -89,7 +134,7 @@ async function rtEncode(req, res) {
             noise.slice(offset)
         ]);
 
-        const bufGzipped = await gzip(bufNoised);
+        const bufGzipped = await compressionAsync.encoders.gzip(bufNoised);
         const bufEncrypted = crypt.aes.encrypt(bufGzipped.toString(encoding), secret, false);
 
         fs.writeFile(file, bufEncrypted, encoding, function(err) {
@@ -107,6 +152,15 @@ async function rtEncode(req, res) {
     done(res, { authKey: secret });
 }
 
+/**
+ * rtDecode
+ * Decodes credit card data
+ * @see https://expressjs.com/ru/4x/api.html#req
+ * @see https://expressjs.com/ru/4x/api.html#res
+ * @param {Object} req An object that represents the HTTP request
+ * @param {Object} res An object that represents the HTTP response
+ * @returns void
+ */
 async function rtDecode(req, res) {
     // const { secret, authKey } = req.body;
     // const data = await loadCreditCardData(authKey);
@@ -190,18 +244,15 @@ async function loadCreditCardData(body) {
         return false;
     }
 
-    if (!await fileExists(destination)) {
-        console.error(arguments.callee.name, `File doesnt exists: "${destination}"`);
-        return false;
-    }
-
     try {
 
-        const buffer = await readFile(destination);
+        // await fileAccessAsync(destination, fs.constants.F_OK | fs.constants.R_OK);
+
+        const buffer = await readFileAsync(destination);
         const cryptedString = crypt.aes.decrypt(buffer, authKey);
         const cryptedBuffer = Buffer.from(cryptedString, 'binary');
 
-        const unzippedBuffer = await gunzip(cryptedBuffer);
+        const unzippedBuffer = await compressionAsync.decoders.gzip(cryptedBuffer);
         const offset = unzippedBuffer[0] + 1;
         const chunk = unzippedBuffer.slice(offset, offset+12);
         data = datas.getCardDatas(chunk);
@@ -216,8 +267,22 @@ async function loadCreditCardData(body) {
     return data;
 }
 
+function getStatusMessage(API, colored=true) {
+    const { name, lat, lng } = API.location;
+    const SIGN_CHECK = '✔';
+    const SIGN_CROSS = '✖';
+    let signStatus = colored ?colors.green(SIGN_CHECK) :SIGN_CHECK;
+    let wordStatus = 'successful';
+
+    if (API.success === false) {
+        signStatus = colored ?colors.red(SIGN_CROSS) :SIGN_CROSS;
+        wordStatus = 'failed';
+    }
+
+    return `  ${signStatus} Payment ${wordStatus}!\n    ${name}  (${lat}, ${lng})\n\n`;
+}
+
 function onApiError(err) {
-    // process.stdout.write(colors.red(arguments.callee.name) + colors.mono(6, ' => '));
     process.stdout.write(colors.red(this.currScenario.name) + colors.mono(6, ' => '));
     console.error(err.toString());
 
@@ -240,25 +305,30 @@ function onApiError(err) {
 }
 
 function onApiData(data) {
-    if (!onApiData.dumpfile) {
-        onApiData.dumpfile = util.format('%s/%s', CACHE_DIR, Date.now());
+    if (!onApiData.streamFile) {
+        const dumpFilename = util.format('%s/%s', CACHE_DIR, Date.now());
+        onApiData.streamFile = fs.createWriteStream(dumpFilename, { autoClose: true });
+        onApiData.reporter = new Reporter({ client: this.client });
     }
 
     try {
-        // const dumpfile = util.format('%s-%s', onApiData.dumpfile, this.currScenarioAlias);
+        onApiData.reporter
+            .setData({ data: data.values || data })
+            .out(onApiData.streamFile)
+            .out(process.stdout)
+        ;
+
         const dumpfile = util.format('%s/%s', CACHE_DIR, this.currScenarioAlias);
-        const values = data.hasOwnProperty('values') ?data.values :data;
-        const fmt = new Formatter({ api:this, indentWidth:4 });
-
-        fmt.log(values);
-        fmt.dump(`${onApiData.dumpfile}.log`, values);
-
-        let body = this.client.body;
-        body = typeof(body)=='string' ?body :JSON.stringify(body, null, 4);
+        const body = typeof(this.client.body) == 'string' 
+            ? this.client.body 
+            : JSON.stringify(this.client.body, null, 4)
+        ;
+        const buff = Buffer.from(body);
 
         // fs.writeFile(dumpfile, body, 'utf8', err => err && console.error(err));
-        zlib.gzip(Buffer.from(body), (_, result) => {
-            fs.writeFile(`${dumpfile}.gz`, result, 'binary', e=>e&&console.error(e))
+        zlib.gzip(buff, (err, result) => {
+            const contents = err ?buff :result;
+            fs.writeFile(`${dumpfile}.gz`, contents, 'binary', e=>e && console.error(e))
         });
 
     } catch (err) {
@@ -266,7 +336,8 @@ function onApiData(data) {
     }
 
     if (this.currScenarioAlias == PortmoneAPI.DONE) {
-        onApiData.dumpfile = false;
+        onApiData.streamFile.end(getStatusMessage(this, false));
+        onApiData.streamFile = false;
     }
 }
 
