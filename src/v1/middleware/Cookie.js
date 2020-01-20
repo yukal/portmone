@@ -1,3 +1,13 @@
+/**
+ * Cookie
+ * 
+ * @file
+ * @ingroup Libraries
+ * @version 1.0
+ * @license MIT
+ * @author Alexander Yukal <yukal@email.ua>
+ */
+
 class Cookie {
     constructor(component) {
         Object.defineProperty(this, 'component', {
@@ -53,7 +63,11 @@ class Cookie {
     }
 }
 
-Cookie.parse = function parseCookie(data) {
+Cookie.AS_STRING = 1;
+Cookie.AS_OBJECT = 2;
+Cookie.AS_ARRAY = 3;
+
+Cookie.parse = function parseCookie(data, valuesOnly=Cookie.AS_OBJECT) {
     const cookiesCollection = typeof(data) == 'string' ?[ data ] :data;
     const today = Date.now();
     const parsed = {};
@@ -85,6 +99,24 @@ Cookie.parse = function parseCookie(data) {
         } else if (cookie.hasOwnProperty('expires') && parsed[ID].hasOwnProperty('expires')) {
             cookie.expires > parsed[ID].expires && (parsed[ID] = cookie);
         }
+    }
+
+    if (valuesOnly != Cookie.AS_OBJECT) {
+        const items = [];
+
+        for (const cookie in parsed) {
+            items.push(parsed[cookie].value);
+        }
+
+        if (valuesOnly === Cookie.AS_STRING) {
+            return items.join('; ');
+        }
+
+        // if (valuesOnly === Cookie.AS_ARRAY) {
+        //     return items;
+        // }
+
+        return items;
     }
 
     return parsed;
