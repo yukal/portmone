@@ -305,7 +305,7 @@ function digitsToBytes(str) {
 
     for (let digit of chunks) {
         if (digit < 10) {
-            digit = parseInt(digit, 10) + (digit.length * 100);
+            digit += 100;
         }
         digit = String.fromCharCode(digit);
         chars = `${chars}${digit}`;

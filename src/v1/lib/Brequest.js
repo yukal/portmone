@@ -84,15 +84,22 @@ class Brequest {
 
     encodeURI(obj) {
         return Querystring.stringify(obj);
-        // let uriChunks = [];
-        // for (const key in obj) {
-        //     const data = obj[key] !== null && typeof obj[key] == 'object'
-        //         ? JSON.stringify(obj[key]) : obj[key];
-        //     const uriChunk = key + '=' + encodeURIComponent(data);
-        //     uriChunks.push(uriChunk);
-        // }
-        // return uriChunks.join('&');
     }
+}
+
+Brequest.downloadFile = function downloadFile(src, dirname, callback) {
+    const RequestModule = src.substr(0,6)=='https:' ?Https: Http;
+    const filename = Brequest.getFilenameFromLink(src);
+    const file = Fs.createWriteStream(`${dirname}/${filename}`, { autoClose: true });
+    const request = RequestModule.get(src, res => {
+        res.pipe(file);
+        callback && res.on('end', () => callback(filename, dirname, request));
+    }).end();
+}
+
+Brequest.getFilenameFromLink = function getFilenameFromLink(link) {
+    const filename = link.match(/[^\/]+$/);
+    return Array.isArray(filename) ?filename.shift() :filename;
 }
 
 function request(options, data) {

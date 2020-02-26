@@ -2,6 +2,7 @@
  * Colors
  * Appends ANSI meta-codes to a textual data
  * https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
+ * http://www.termsys.demon.co.uk/vtansi.htm
  *
  * The 16 colors names:
  *   0. black     8. gray

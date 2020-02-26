@@ -60,7 +60,7 @@ class Reporter {
     /**
      * out
      * Writes data to a stream
-     * @see middleware/colors.js
+     * @see lib/colors.js
      *
      * @param {WriteStream} stream WritableStream
      * @param {Bool} colored [optional] Appends ANSI metacodes to a string

@@ -25,14 +25,14 @@ const fs = require('fs');
 const readFileAsync = fs.promises.readFile;
 const randomBytesAsync = util.promisify(crypto.randomBytes);
 
-const { fail, done } = require('../middleware/process');
-const compressionAsync = require('../middleware/asyncCompression');
+const { fail, done } = require('../lib/process');
+const compressionAsync = require('../lib/asyncCompression');
 const config = require('../../config.json');
-const crypt = require('../middleware/crypt');
-const datas = require('../middleware/datas');
-const colors = require('../middleware/colors');
-const Reporter = require('../middleware/Reporter');
-const PortmoneAPI = require('../middleware/PortmoneAPI');
+const crypt = require('../lib/crypt');
+const datas = require('../lib/datas');
+const colors = require('../lib/colors');
+const Reporter = require('../lib/Reporter');
+const PortmoneAPI = require('../lib/PortmoneAPI');
 const CACHE_DIR = './data/cache';
 
 let API;
@@ -299,6 +299,10 @@ function onApiError(err) {
         delete dumpData.error_object;
     }
 
+    if (dumpData.body instanceof Object) {
+        dumpData.body = JSON.stringify(dumpData.body, null, 4);
+    }
+
     const content = JSON.stringify(dumpData, null, 4);
     const dumpfile = util.format('%s/%s.dump', CACHE_DIR, this.currScenarioAlias);
     fs.writeFile(dumpfile, content, 'utf8', er => er && console.error(er));
@@ -342,8 +346,8 @@ function onApiData(data) {
 }
 
 module.exports = {
-    bill: rtBill,
-    checkPin: rtCheckPin,
-    encode: rtEncode,
-    decode: rtDecode,
+    rtBill,
+    rtCheckPin,
+    rtEncode,
+    rtDecode,
 };
