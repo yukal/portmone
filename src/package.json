@@ -1,7 +1,7 @@
 {
   "name": "phonebill",
   "version": "1.0.0",
-  "description": "A sample Node.js app using Express 4",
+  "description": "A little REST API interface example based on the Node.js, Express.js, and Vue.js that make replenishment of a Kyivstar mobile account by credit card data",
   "engines": {
     "node": "10.x"
   },
@@ -16,5 +16,5 @@
     "ejs": "^2.6.2",
     "express": "^4.17.1"
   },
-  "license": "GNU GPLv3"
+  "license": "MIT"
 }
