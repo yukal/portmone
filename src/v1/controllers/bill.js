@@ -3,14 +3,14 @@
  * This controller implements:
  * - payment of mobile telephone (Kyivstar only) by a credit card data
  * - encoding/decoding of credit card data for secure data transfer
- * - implementing of Express routes:
+ * - implementing of routes:
  *   - post /v1/bill/pay
  *   - post /v1/bill/pay-confirm
  *   - post /v1/bill/encode-ccard
  *   - post /v1/bill/decode-ccard
  *
  * @file
- * @ingroup Express.Controllers
+ * @ingroup Controllers
  * @version 1.0
  * @license MIT
  * @author Alexander Yukal <yukal@email.ua>
@@ -46,15 +46,15 @@ let API;
  * @param {Object} res An object that represents the HTTP response
  * @returns void
  */
-async function actPostPay(req, res) {
-    if (! validateBodyPostPay(req.body)) {
+async function actPostPay(req, res, body) {
+    if (! validateBodyPostPay(body)) {
         return fail.json(res, 'Wrong parameters');
     }
 
     const currency = 'UAH';
-    const amount = Number.parseInt(req.body.amount, 10) || 0;
-    const phone = datas.parseMobilePhone(req.body.phone);
-    const CCARD = await loadCreditCardData(req.body);
+    const amount = Number.parseInt(body.amount, 10) || 0;
+    const phone = datas.parseMobilePhone(body.phone);
+    const CCARD = await loadCreditCardData(body);
     const apiParams = Object.assign({}, config, {onApiData, onApiError});
 
     if (!CCARD) {
@@ -78,8 +78,8 @@ async function actPostPay(req, res) {
  * @param {Object} res An object that represents the HTTP response
  * @returns void
  */
-async function actPostPayConfirm(req, res) {
-    if (! validateBodyPostPayConfirm(req.body)) {
+async function actPostPayConfirm(req, res, body) {
+    if (! validateBodyPostPayConfirm(body)) {
         return fail.json(res, 'Wrong parameters');
     }
 
@@ -88,7 +88,7 @@ async function actPostPayConfirm(req, res) {
         API = new PortmoneAPI(apiParams);
     }
 
-    API.checkPin(req.body.pin)
+    API.checkPin(body.pin)
         .then(() => {
             process.stdout.write(getStatusMessage(API));
             done.json(res);
@@ -111,10 +111,10 @@ async function actPostPayConfirm(req, res) {
  * @param {Object} res An object that represents the HTTP response
  * @returns void
  */
-async function actPostEncodeCcard(req, res) {
-    const { MM, YY, cvv2, card_number } = req.body;
+async function actPostEncodeCcard(req, res, body) {
+    const { MM, YY, cvv2, card_number } = body;
 
-    if (! validateBodyPostEncodeCcard(req.body)) {
+    if (! validateBodyPostEncodeCcard(body)) {
         return fail.json(res, 'Wrong parameters');
     }
 
@@ -166,12 +166,12 @@ async function actPostEncodeCcard(req, res) {
  * @param {Object} res An object that represents the HTTP response
  * @returns void
  */
-async function actPostDecodeCcard(req, res) {
-    if (!req.body.authKey) {
+async function actPostDecodeCcard(req, res, body) {
+    if (!body.authKey) {
         return fail.json(res, 'Wrong parameters');
     }
 
-    const data = await loadCreditCardData(req.body);
+    const data = await loadCreditCardData(body);
     data? done.json(res, { data }) 
         : fail.json(res, 'Cannot load data')
     ;
