@@ -14,7 +14,7 @@
 importScripts("https://storage.googleapis.com/workbox-cdn/releases/3.6.3/workbox-sw.js");
 
 importScripts(
-  "/precache-manifest.2c615be8d77b13c8afa66af04414d1c4.js"
+  "/precache-manifest.d9f3b3aaa13f0be07136d5a920831614.js"
 );
 
 workbox.core.setCacheNameDetails({prefix: "portmone_vue"});

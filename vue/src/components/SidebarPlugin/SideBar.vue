@@ -7,7 +7,7 @@
                 <span class="navbar-toggler-icon"></span>
             </navbar-toggle-button>
             <router-link class="navbar-brand" to="/">
-                <img :src="logo" class="navbar-brand-img" width=32 height=32 alt="vicky">
+                <img :src="logo" class="navbar-brand-img" width=38 alt="vicky">
             </router-link>
 
             <slot></slot>
