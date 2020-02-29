@@ -10,8 +10,6 @@ export default {
             },
             confirmData: {
                 pin: '',
-                sid: '',
-                PHPSESSID: '',
             },
             location: {},
         };
@@ -20,7 +18,7 @@ export default {
     methods: {
         onSubmit(evt) {
             evt.preventDefault();
-            this.$http.post('/v1/bill', this.data)
+            this.$http.post('/v1/bill/pay', this.data)
                 .then(response => {
                     if (this.$validResponse(response)) {
                         const { location, jsessionid, PHPSESSID } = response.body;
@@ -35,7 +33,7 @@ export default {
 
         onConfirm(evt) {
             evt.preventDefault();
-            this.$http.post('/v1/pin', this.confirmData)
+            this.$http.post('/v1/bill/pay-confirm', this.confirmData)
                 .then(response => {
                     if (this.$validResponse(response)) {
                         const title = 'Успішно';

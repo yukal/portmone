@@ -1,10 +1,10 @@
 module.exports = (express, controllers) => {
     const router = express.Router();
 
-    router.post('/encode', controllers.ctrlBill.rtEncode);
-    router.post('/decode', controllers.ctrlBill.rtDecode);
-    router.post('/bill', controllers.ctrlBill.rtBill);
-    router.post('/pin', controllers.ctrlBill.rtCheckPin);
+    router.post('/bill/pay', controllers.bill.actPostPay);
+    router.post('/bill/pay-confirm', controllers.bill.actPostPayConfirm);
+    router.post('/bill/encode-ccard', controllers.bill.actPostEncodeCcard);
+    router.post('/bill/decode-ccard', controllers.bill.actPostDecodeCcard);
 
     return router;
 };

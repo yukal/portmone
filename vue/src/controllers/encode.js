@@ -16,7 +16,7 @@ export default {
     methods: {
         onSubmit(evt) {
             evt.preventDefault();
-            this.$http.post('/v1/encode', this.CCARD)
+            this.$http.post('/v1/bill/encode-ccard', this.CCARD)
                 .then(response => {
                     if (this.$validResponse(response)) {
                         this.authKey = response.body.authKey;

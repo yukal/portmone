@@ -17,9 +17,9 @@ module.exports = {
         // lazy: true,
 
         proxy: {
-            '/v1': {
+            '/': {
                 // pathRewrite: { '^/api': '/api/v1' },
-                target: 'http://localhost:5000',
+                target: 'https://localhost:5000',
                 secure: false,
                 changeOrigin: true,
             }

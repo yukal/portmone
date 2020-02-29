@@ -1,3 +1,3 @@
 module.exports = {
-    ctrlBill: require('./bill'),
+    bill: require('./bill'),
 };
