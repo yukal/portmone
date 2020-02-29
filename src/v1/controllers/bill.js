@@ -1,13 +1,13 @@
 /**
- * Bill
+ * Bill Controller
  * This controller implements:
- * - payment of mobile telephone (Kyivstar only) using a credit card
+ * - payment of mobile telephone (Kyivstar only) by a credit card data
  * - encoding/decoding of credit card data for secure data transfer
  * - implementing of Express routes:
- *   - post /v1/bill
- *   - post /v1/pin
- *   - post /v1/encode
- *   - post /v1/decode
+ *   - post /v1/bill/pay
+ *   - post /v1/bill/pay-confirm
+ *   - post /v1/bill/encode-ccard
+ *   - post /v1/bill/decode-ccard
  *
  * @file
  * @ingroup Express.Controllers
@@ -38,7 +38,7 @@ const CACHE_DIR = './data/cache';
 let API;
 
 /**
- * rtBill
+ * actPostPay
  * Replenishment of a mobile account
  * @see https://expressjs.com/ru/4x/api.html#req
  * @see https://expressjs.com/ru/4x/api.html#res
@@ -46,9 +46,9 @@ let API;
  * @param {Object} res An object that represents the HTTP response
  * @returns void
  */
-async function rtBill(req, res) {
-    if (! validateBillBody(req.body)) {
-        return fail(res, 'Wrong parameters');
+async function actPostPay(req, res) {
+    if (! validateBodyPostPay(req.body)) {
+        return fail.json(res, 'Wrong parameters');
     }
 
     const currency = 'UAH';
@@ -58,31 +58,29 @@ async function rtBill(req, res) {
     const apiParams = Object.assign({}, config, {onApiData, onApiError});
 
     if (!CCARD) {
-        return fail(res, 'Cant load credit card data');
+        return fail.json(res, 'Cannot load data');
     }
 
     API = new PortmoneAPI(apiParams);
 
     API.bill(currency, amount, phone, CCARD)
-        .then(data => done(res, data))
-        .catch(err => fail(res, err))
+        .then(data => done.json(res, data))
+        .catch(err => fail.json(res, err))
     ;
 }
 
 /**
- * rtCheckPin
- * Confirmation of the payment by pin code
+ * actPostPayConfirm
+ * Confirmation of the payment by a pin code
  * @see https://expressjs.com/ru/4x/api.html#req
  * @see https://expressjs.com/ru/4x/api.html#res
  * @param {Object} req An object that represents the HTTP request
  * @param {Object} res An object that represents the HTTP response
  * @returns void
  */
-function rtCheckPin(req, res) {
-    const { pin } = req.body;
-
-    if (! validatePinBody(pin)) {
-        return fail(res, 'Wrong parameters');
+async function actPostPayConfirm(req, res) {
+    if (! validateBodyPostPayConfirm(req.body)) {
+        return fail.json(res, 'Wrong parameters');
     }
 
     if (!API) {
@@ -90,20 +88,22 @@ function rtCheckPin(req, res) {
         API = new PortmoneAPI(apiParams);
     }
 
-    API.checkPin(pin)
+    API.checkPin(req.body.pin)
         .then(() => {
             process.stdout.write(getStatusMessage(API));
-            done(res);
+            done.json(res);
         })
         .catch(() => {
             process.stdout.write(getStatusMessage(API));
-            fail(res, 'unknown error');
+            fail.json(res, 'Unknown error');
         })
     ;
+
+    // return res.end('Ok');
 }
 
 /**
- * rtEncode
+ * actPostEncodeCcard
  * Encodes credit card data
  * @see https://expressjs.com/ru/4x/api.html#req
  * @see https://expressjs.com/ru/4x/api.html#res
@@ -111,8 +111,13 @@ function rtCheckPin(req, res) {
  * @param {Object} res An object that represents the HTTP response
  * @returns void
  */
-async function rtEncode(req, res) {
+async function actPostEncodeCcard(req, res) {
     const { MM, YY, cvv2, card_number } = req.body;
+
+    if (! validateBodyPostEncodeCcard(req.body)) {
+        return fail.json(res, 'Wrong parameters');
+    }
+
     const creditCardDigits = util.format('%s%s%s%s', card_number, cvv2, MM, YY);
     const bufBytes = datas.digitsToBytes(creditCardDigits);
 
@@ -149,11 +154,11 @@ async function rtEncode(req, res) {
 
     }
 
-    done(res, { authKey: secret });
+    done.json(res, { authKey: secret });
 }
 
 /**
- * rtDecode
+ * actPostDecodeCcard
  * Decodes credit card data
  * @see https://expressjs.com/ru/4x/api.html#req
  * @see https://expressjs.com/ru/4x/api.html#res
@@ -161,27 +166,19 @@ async function rtEncode(req, res) {
  * @param {Object} res An object that represents the HTTP response
  * @returns void
  */
-async function rtDecode(req, res) {
-    // const { secret, authKey } = req.body;
-    // const data = await loadCreditCardData(authKey);
+async function actPostDecodeCcard(req, res) {
+    if (!req.body.authKey) {
+        return fail.json(res, 'Wrong parameters');
+    }
 
-    // if (! await verifyAuth(data, authKey, config)) {
-    //     return fail(res, 'Wrong auth key');
-    // }
-
-    // let CCARD = crypt.aes.decrypt(data.data, data.secret);
-
-    // if (datas.isJSON(CCARD)) {
-    //     CCARD = JSON.parse(CCARD);
-    //     CCARD.card_number_mask = datas.getMaskCardN16(CCARD.card_number);
-    // }
-
-    // done(res, { CCARD });
-    done(res);
+    const data = await loadCreditCardData(req.body);
+    data? done.json(res, { data }) 
+        : fail.json(res, 'Cannot load data')
+    ;
 }
 
 
-function validateBillBody(body) {
+function validateBodyPostPay(body) {
     const { amount, phone, secret, authKey, MM, YY, cvv2, card_number } = body;
     const HAS_AUTH = !!authKey;
 
@@ -201,24 +198,20 @@ function validateBillBody(body) {
     return HAS_PAYMENT ?HAS_CARD_DATA||HAS_AUTH :false;
 }
 
-function validatePinBody(pin) {
-    return pin ? /\d{6,}/.test(pin) :false;
+function validateBodyPostPayConfirm(body) {
+    return body.pin ? /\d{6,}/.test(body.pin) :false;
 }
 
-async function verifyAuth(data, key, config, decode='base64') {
-    if (! data) {
-        return false;
-    }
+function validateBodyPostEncodeCcard(body) {
+    const { MM, YY, cvv2, card_number } = body;
 
-    const { type } = config.crypt.encOpts.publicKeyEncoding;
-    const publicKey = await crypt.rsa.decompress(key, type, decode);
-
-    return data.secret != ''
-        && data.data != ''
-        && crypt.rsa.verifySignature(data.privateKey, publicKey, data.secret)
+    return MM && YY && cvv2 && card_number 
+        ? /\d{16}/.test(card_number)
+            && /\d{2}/.test(MM) 
+            && /\d{2}/.test(YY) 
+            && /\d{3}/.test(cvv2) 
+        : false
     ;
-    // const sign = crypt.rsa.getSignature(privateKey, secret);
-    // const check = crypt.rsa.verifySignature(privateKey, publicKey, secret);
 }
 
 async function loadCreditCardData(body) {
@@ -299,10 +292,6 @@ function onApiError(err) {
         delete dumpData.error_object;
     }
 
-    if (dumpData.body instanceof Object) {
-        dumpData.body = JSON.stringify(dumpData.body, null, 4);
-    }
-
     const content = JSON.stringify(dumpData, null, 4);
     const dumpfile = util.format('%s/%s.dump', CACHE_DIR, this.currScenarioAlias);
     fs.writeFile(dumpfile, content, 'utf8', er => er && console.error(er));
@@ -346,8 +335,8 @@ function onApiData(data) {
 }
 
 module.exports = {
-    rtBill,
-    rtCheckPin,
-    rtEncode,
-    rtDecode,
+    actPostPay,
+    actPostPayConfirm,
+    actPostEncodeCcard,
+    actPostDecodeCcard,
 };
