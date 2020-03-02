@@ -279,13 +279,18 @@ function onApiError(err) {
     process.stdout.write(colors.red(this.currScenario.name) + colors.mono(6, ' => '));
     console.error(err.toString());
 
+    let body = this.client.body;
+    if (body instanceof Buffer) {
+        body = body.toString();
+    }
+
     const dumpData = {
         error_string: err.toString(),
         error_object: err,
         href: this.client.requestOptions.href,
         headers: this.client.res ?this.client.res.headers :typeof(this.client.res),
         data: this.client.requestData,
-        body: this.client.body.toString(),
+        body,
     };
 
     if (datas.isEmpty(dumpData.error_object)) {
