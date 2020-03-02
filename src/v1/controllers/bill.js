@@ -335,8 +335,10 @@ function onApiData(data) {
 }
 
 module.exports = {
-    actPostPay,
-    actPostPayConfirm,
-    actPostEncodeCcard,
-    actPostDecodeCcard,
+    bill: {
+        actPostPay,
+        actPostPayConfirm,
+        actPostEncodeCcard,
+        actPostDecodeCcard,
+    }
 };

@@ -1,3 +1,3 @@
-module.exports = {
-    bill: require('./bill'),
-};
+module.exports = Object.assign({},
+    require('./bill')
+);

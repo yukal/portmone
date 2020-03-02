@@ -13,9 +13,6 @@ const SRV_HOST = '0.0.0.0';
 const SRV_PORT = 5000;
 const SRV_TIMEOUT = 15000;
 const MAX_PAYLOAD = 2048;
-const UNSUPPORTED_METHOD = 1;
-const UNSUPPORTED_PATH = 2;
-const ROUTE_EXCEPTION = 3;
 
 class HttpError extends Error {
     constructor(statusCode, message='') {
@@ -163,8 +160,7 @@ function onClientEnd(req, res, dataPocket) {
         return controller.call(this, req, res, data);
     }
 
-    process.stdout.write(`${connectionId} (${arguments.callee.name}) >> NOT_FOUND${CRLF}`);
-    return fail.json(res, getErrorMessage(controller), 404);
+    return fail.json(res, 'Unsupported url-path or request-method', 404);
 
     // return controller instanceof Function
     //     ? controller.call(this, req, res, data)
@@ -210,37 +206,36 @@ function getController(request, controllers) {
     if (url.length > 1) {
         const urlChunks = url.substr(1).toLowerCase().split('/');
         let urlChunksLen = urlChunks.length;
-        let urlChunk, lastUrl, controllerName;
+        let urlChunk;
+        let controllerName = '';
         let nesting = controllers;
-        let hasNesting = false;
 
-        // Entering inside controller object by given nested url path: "/a/b/../z"
-        while (urlChunk = urlChunks.shift()) {
+        while (urlChunksLen > 1) {
+            urlChunk = urlChunks.shift();
             urlChunksLen--;
 
-            if (hasNesting = nesting.hasOwnProperty(urlChunk)) {
+            if (nesting.hasOwnProperty(urlChunk)) {
                 nesting = nesting[ urlChunk ];
             } else {
                 break;
             }
-
-            lastUrl = urlChunk;
         }
 
-        controllerName = !urlChunksLen ? getControllerName(lastUrl, method) : '';
+        if (urlChunksLen == 1) {
+            controllerName = getControllerName(urlChunks.shift(), method);
 
-        if (controllerName && hasNesting && nesting.hasOwnProperty( controllerName )) {
-            nesting = nesting[ controllerName ];
+            if (!controllerName) {
+                return false;
+            }
+
+            return nesting.hasOwnProperty(controllerName)
+                ? nesting[ controllerName ] 
+                : false
+            ;
         }
-
-        if (nesting.name === controllerName && nesting instanceof Function) {
-            return nesting;
-        }
-
-        return hasNesting ?UNSUPPORTED_METHOD :UNSUPPORTED_PATH;
     }
 
-    return ROUTE_EXCEPTION;
+    return false;
 }
 
 function getControllerName(methodName='', prefix='') {
@@ -265,16 +260,4 @@ function getRouteFromRequest(request, root='/home') {
 
     url = `act-${method}-${url.substr(1)}`.toLowerCase();
     return url.replace(/\-\w/g, s => s[1].toUpperCase());
-}
-
-function getErrorMessage(msgId) {
-    const errors = {};
-    errors[ UNSUPPORTED_METHOD ] = 'Unsupported request-method by given path';
-    errors[ UNSUPPORTED_PATH ] = 'Given url-address not implemented';
-    errors[ ROUTE_EXCEPTION ] = 'Cannot process url-address';
-
-    return errors.hasOwnProperty(msgId) 
-        ? errors[ msgId ] 
-        : errors[ ROUTE_EXCEPTION ]
-    ;
 }
