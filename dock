@@ -44,7 +44,7 @@ fi
 
 if [ -z "$CONTAINER_ID" ]; then
     # The container hasn't found. Run from the image
-    docker run -it --rm --name $APP_NAME -p "${PORTS}" -p 5001:5001 --network bridge \
+    docker run -it --rm --name $APP_NAME -p "${PORTS}" -p 5001:5001 -p 9229:9229 --network bridge \
         -v "${PWD}":"${WORKDIR}" \
         -w "${WORKDIR}" $APP_IMAGE $ARG
 else

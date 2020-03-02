@@ -8,7 +8,7 @@
   "main": "index.js",
   "scripts": {
     "start": "mode=pro node index.js",
-    "serve": "mode=dev node index.js"
+    "serve": "mode=dev node --inspect=0.0.0.0:9229 index.js"
   },
   "dependencies": {
     "body-parser": "^1.19.0",
